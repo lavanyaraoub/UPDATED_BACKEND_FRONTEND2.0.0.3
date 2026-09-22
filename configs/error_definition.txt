@@ -1,0 +1,53 @@
+0 : No Alarms
+    1: 1 Drive not ready / Switch-on disabled (normal startup state — not a fault)
+    11: 11 Inaccurate ESM demand error protection
+    12: 12 ESM undefined request error protection
+    13: 13 Bootstrap requests error protection
+    14: 14 Over-current protection
+    15: 15 Over-heat protection
+    16: 16 Over-load protection
+    18: 18 Over re-generation load protection
+    21: 21 Encode communication error
+    23: 23 Encode communication data protection error
+    24: 24 Position deviation excess protection
+    25: 25 Hybrid deviation excess protection
+    26: 26 Over-Speed Protection
+    27: 27 Absolute clear protection
+    28: 28 Limit of pulse replay error protection
+    29: 29 Deviation counter overflow protection 2
+    30: 30 Safety detection
+    33: 33 Overlaps allocation error 1 protection
+    34: 34 Software limit protection
+    36: 36 EEPROM parameter error protection
+    37: 37 EEPROM check code error protection
+    38: 38 Over-travel inhibit input protection 1
+    41: 41 Safety detection
+    42: 42 Absolute over-speed error protection
+    43: 43 Incremental encoder initialization error protection
+    44: 44 Absolute single turn counter error protection or Incremental signal turn counter error protection
+    45: 45 Absolute multi-turn counter error protection or Incremental multi-turn counter error protection
+    47: 47 Absolute status error protection
+    48: 48 Incremental encoder Z-phase error protection
+    49: 49 Incremental encoder CS signal error protection
+    45: 45 Incomplete PLL error protection
+    27: 27 PDO watchdog error protection
+    50: 50 PLL error protection
+    44: 44 Synchronization signal error protection
+    53: 53 Synchronization cycle error protection
+    22: 22 Mailbox error protection
+    31: 31 PDO watchdog error protection
+    48: 48 DC error protection
+    40: 40 SM event mode error protection(DO MULTITURNDATA requests)
+    29: SyncManager2/3 error protection
+    36: TxPDO assignment error protection
+    37: RxPDO assignment error protection
+    80: ESM unauthorized request error protection
+    81: Synchronization cycle error protection
+    85: TxPDO assignment error protection
+    87: 87 Hardware Emergency pressed
+    88: 88 ESM requirements during operation error protection
+    //93: 93 Error Code 93 Please restart the system and if the problem persistcontact the Supplier
+    98: 98 Clamp failed
+    99: 99 Declamp failed
+    96: 96 POT Limit Exceeded
+    97: 97 NOT Limit Exceeded
