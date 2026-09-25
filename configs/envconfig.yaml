@@ -1,0 +1,17 @@
+# mode can be release or debug, if the mode is not in debug all the log messages 
+# will send to log.log file. In debug mode all logs will send to the console.
+mode: "release"
+
+# used for updating the software. Software can listen to a particular channel
+# releases to that channel will kick the software to download the updates
+rel_channel: "v1"
+
+# log_level can be TRACE, DEBUG, INFO
+log_level: "TRACE"
+
+ui: "v2"
+
+# create hotspot when starting up the system. 
+hot_spot_on_startup: false
+
+tunnel_access: "welcome@123"

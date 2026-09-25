@@ -1,0 +1,492 @@
+---
+# ****************************************************************************************************
+# EDITTING OF THIS FILE SHOULD BE DONE BY EXPERIENCED PERSONNEL ONLY
+# ANY CHANGE WITHOUT PROPER KNOWLEDGE OF ETHERCAT DEVICE ADDRESSING CAN CAUSE DAMAGE TO THE SYSTEM
+# ****************************************************************************************************
+# EtherCAT addressing configuration for Delta ASDA-A2-E series drives.
+# VendorID: 0x000001DD  ProductCode: 0x10305070
+#
+# Key differences from Panasonic A6:
+#  - CSP mode (0x6060=0x08) used by default; interpolation period configured via 0x60C2
+#  - Digital inputs read from standard 0x60FD (active-HIGH POT/NOT)
+#  - No vendor-specific objects (0x4F25, 0x4D00, 0x4D01, 0x60FE)
+#  - No multiturn reset, no finish signal, no clamp/declamp via PDO
+
+ethercat:
+    - operation:
+      name: configure
+      steps:
+        - step:
+          name: "operation mode (CSP)"
+          address: 0x6060
+          subindex: 0x00
+          value: "0x1"
+          delay: 0
+          isBinary: false
+          dataType: "U8"
+        - step:
+          name: "interpolation time period value"
+          address: 0x60C2
+          subindex: 0x01
+          value: "1"
+          delay: 0
+          isBinary: false
+          dataType: "U8"
+        - step:
+          name: "interpolation time period index"
+          address: 0x60C2
+          subindex: 0x02
+          value: "253"
+          delay: 0
+          isBinary: false
+          dataType: "I8"
+        - step:
+          name: "target position"
+          address: 0x607A
+          subindex: 0x00
+          value: "100000"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+        - step:
+          name: "profile velocity"
+          address: 0x6081
+          subindex: 0x00
+          value: "1000000"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+        - step:
+          name: "acceleration time (P1-34)"
+          address: 0x2122
+          subindex: 0x00
+          value: "200" # 200 ms acceleration
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+        - step:
+          name: "deceleration time (P1-35)"
+          address: 0x2123
+          subindex: 0x00
+          value: "200" # 200 ms deceleration
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+        # NOTE: 0x6083/0x6084 (Profile Acceleration / Deceleration) are rejected by
+        # the Delta ASDA-A2-E via SDO in all tested configurations — the drive returns
+        # I/O error on every retry. Attempting to write them fires a startup alarm which
+        # blocks the "No Alarms" state. These objects are omitted here.
+        # The drive uses its factory-default acceleration profile for Mode 3 jog.
+    - operation:
+      name: poweron
+      steps:
+        - step:
+          name: "drive init"
+          address: 0x6040
+          subindex: 0x00
+          value: "0x0006"
+          delay: 100000
+          isBinary: false
+          dataType: "U16"
+        - step:
+          name: "drive magnetize"
+          address: 0x6040
+          subindex: 0x00
+          value: "7"
+          delay: 100000
+          isBinary: false
+          dataType: "U16"
+    - operation:
+      name: fastPowerOn
+      steps:
+        - step:
+          name: "fast poweron"
+          address: 0x6040
+          subindex: 0x00
+          value: "0000000000001111"
+          delay: 0
+          isBinary: true
+          dataType: "U16"
+          action: "write"
+    - operation:
+      name: fastPowerOff
+      steps:
+        - step:
+          name: "fast poweroff read"
+          address: 0x6040
+          subindex: 0x00
+          value: "0xFFFF"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "read"
+        - step:
+          name: "fast poweroff"
+          address: 0x6040
+          subindex: 0x00
+          value: "00000110"
+          delay: 0
+          isBinary: true
+          dataType: "U16"
+          action: "write"
+    - operation:
+      name: poweroff
+      steps:
+        - step:
+          name: "start power off"
+          address: 0x6040
+          subindex: 0x00
+          value: "11111111"
+          delay: 0
+          isBinary: true
+          dataType: "U16"
+        - step:
+          name: "power off"
+          address: 0x6040
+          subindex: 0x00
+          value: "00000110"
+          delay: 0
+          isBinary: true
+          dataType: "U16"
+    - operation:
+      name: manualjog
+      steps:
+        - step:
+          name: "target velocity"
+          address: 0x60FF
+          subindex: 0x00
+          #value will be populated by the system. Do not change the jog_rpm_placeholder string.
+          value: "jog_rpm_placeholder"
+          isBinary: false
+          dataType: "U32"
+          delay: 0
+        - step:
+          name: "operation mode (PV)"
+          address: 0x6060
+          subindex: 0x00
+          value: "0x3"
+          delay: 0
+          isBinary: false
+          dataType: "U8"
+    - operation:
+      name: stopjog
+      steps:
+        - step:
+          name: "target velocity"
+          address: 0x60FF
+          subindex: 0x00
+          value: "0"
+          isBinary: false
+          dataType: "U32"
+          delay: 0
+    - operation:
+      name: pollstatus
+      steps:
+        - step:
+          name: "poll status"
+          address: 0x6064
+          subindex: 0x00
+          value: "0xFFFF"
+          delay: 5000
+          isBinary: false
+          dataType: "UINT"
+          action: "read"
+    - operation:
+      name: faultReset
+      steps:
+        - step:
+          name: "fault reset"
+          address: 0x6040
+          subindex: 0x00
+          value: "10001111"
+          delay: 150000
+          isBinary: true
+          dataType: "U16"
+          action: "write"
+        - step:
+          name: "clear DO"
+          address: 0x60FE
+          subindex: 0x01
+          value: "0"
+          dataType: "U32"
+          action: "write"
+        - step:
+          name: "read current controlword"
+          address: 0x6040
+          subindex: 0x00
+          value: "0xFFFF"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "read"
+        - step:
+          name: "fault reset rising edge"
+          address: 0x6040
+          subindex: 0x00
+          value: "10001111"
+          delay: 150000
+          isBinary: true
+          dataType: "U16"
+          action: "write"
+        - step:
+          name: "CSP mode"
+          address: 0x6060
+          subindex: 0x00
+          value: "8"
+          delay: 0
+          isBinary: false
+          dataType: "U8"
+          action: "write"
+    - operation:
+      # Delta has no multiturn reset — this operation is intentionally empty.
+      name: resetMultiTurn
+      steps:
+        - step:
+          name: "Unlock parameter protection (P2-08)"
+          address: 0x2208
+          subindex: 0x00
+          value: "271"
+          delay: 50000
+          isBinary: false
+          dataType: "U16"
+          action: "write"
+        - step:
+          name: "Trigger absolute encoder reset (P2-71)"
+          address: 0x2247
+          subindex: 0x00
+          value: "1"
+          delay: 100000
+          isBinary: false
+          dataType: "U16"
+          action: "write"
+    - operation:
+      name: readinputsignal
+      steps:
+        - step:
+          name: "read digital inputs (0x60FD)"
+          address: 0x60FD
+          subindex: 0x00
+          value: "0xFFFFFFFF"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+          action: "read"
+    - operation:
+      name: jog
+      steps:
+        - step:
+          name: "set rotation status"
+          address: 0x6040
+          subindex: 0x00
+          value: "0x005f"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "write"
+        - step:
+          name: "read rotation status"
+          address: 0x6041
+          subindex: 0x00
+          value: "0xFFFF"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "read"
+    - operation:
+      name: moveToPosition
+      steps:
+        - step:
+          name: "move to position"
+          address: 0x607A
+          subindex: 0x00
+          value: "move_to_pos_val"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+          action: "write"
+    - operation:
+      name: setRPM
+      steps:
+        - step:
+          name: "set profile velocity"
+          address: 0x6081
+          subindex: 0x00
+          value: "rpm_val"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+          action: "write"
+    - operation:
+      name: readError
+      steps:
+        - step:
+          name: "read error from the driver"
+          address: 0x603F
+          subindex: 0x00
+          value: "0xFFFF"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "read"
+    - operation:
+      # Delta has no ECS input in 0x60FD — no-op.
+      name: ecs
+      steps:
+    - operation:
+      # Delta has no hardware reset input in 0x60FD — no-op.
+      name: hard_reset
+      steps:
+    - operation:
+      # Delta has no digital output PDO — finish signal is a no-op.
+      name: finsignal
+      steps:
+    - operation:
+      name: readStatusword
+      steps:
+        - step:
+          name: "read statusword"
+          address: 0x6041
+          subindex: 0x00
+          value: "0xFFFF"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "read"
+    - operation:
+      name: finsignalend
+      steps:
+    - operation:
+      # Delta has no brake solenoid via PDO — no-op.
+      name: break_on
+      steps:
+    - operation:
+      name: break_off
+      steps:
+    - operation:
+      name: emergency
+      steps:
+    - operation:
+      name: reverse
+      steps:
+        - step:
+          name: "Activate reverse direction"
+          address: 0x607E
+          subindex: 0x00
+          value: "224"
+          delay: 0
+          isBinary: false
+          dataType: "U8"
+          action: "write"
+    - operation:
+      name: nonreverse
+      steps:
+        - step:
+          name: "Activate non reverse direction"
+          address: 0x607E
+          subindex: 0x00
+          value: "0"
+          delay: 0
+          isBinary: false
+          dataType: "U8"
+          action: "write"
+# ============================================================
+# PDO Layout — Phase 2: Dynamic Slave Mapping
+#
+# This section defines the EtherCAT PDO structure for the
+# Delta ASDA-A2-E. Previously this was hardcoded as C arrays
+# (delta_rx_entries[], delta_tx_entries[]) in ethercatinterface.c.
+#
+# Moving it here means:
+#   - Adding a new drive brand = write a new YAML, zero C changes
+#   - The 'name' field maps each entry to its SlaveOffsets field
+#     in the generic C registration engine (Phase 3)
+#
+# Sync manager directions:
+#   output = RxPDO (master writes TO drive)   — SM2
+#   input  = TxPDO (drive writes TO master)   — SM3
+#
+# Bit widths must match the drive's ESI file exactly.
+# Mismatches cause ecrt_domain_reg_pdo_entry_list() to fail.
+# ============================================================
+# ============================================================
+# motion: — Drive-hardware motion parameters
+# See a6minas.yml for field descriptions.
+#
+# Delta ASDA-A2-E:
+#   rpm_const:    The comment in device-configuration.yml noted "10 for delta"
+#   drive_x_ratio: Delta ASDA2E default encoder resolution
+# ============================================================
+motion:
+  rpm_const: 10.0
+  drive_x_ratio: 10000
+
+pdo:
+  # dc_assign_activate: Distributed Clock sync assignment.
+  # Set to 0 to preserve existing behaviour (DC sync not configured).
+  # The Delta ASDA-2E was working without DC sync before this field was
+  # introduced. Only change this if you are seeing timing-related faults
+  # on this drive. For reference: 0x0300 enables SYNC0+SYNC1 (1ms cycle).
+  dc_assign_activate: 0x0000
+  sync_managers:
+    - sm: 2
+      direction: output
+      watchdog: enable
+      pdo_index: 0x1600
+      entries:
+        - index: 0x6040
+          subindex: 0x00
+          bits: 16
+          name: ctrl_word
+        - index: 0x607A
+          subindex: 0x00
+          bits: 32
+          name: target_pos
+        - index: 0x60FF
+          subindex: 0x00
+          bits: 32
+          name: target_vel
+        - index: 0x6071
+          subindex: 0x00
+          bits: 16
+          name: _pad_torque
+        - index: 0x6060
+          subindex: 0x00
+          bits: 8
+          name: op_mode
+        - index: 0x60FE
+          subindex: 0x01
+          bits: 32
+          name: dig_out_val
+    - sm: 3
+      direction: input
+      watchdog: disable
+      pdo_index: 0x1A00
+      entries:
+        - index: 0x6041
+          subindex: 0x00
+          bits: 16
+          name: status_word
+        - index: 0x6064
+          subindex: 0x00
+          bits: 32
+          name: actual_pos
+        - index: 0x606C
+          subindex: 0x00
+          bits: 32
+          name: actual_vel
+        - index: 0x6077
+          subindex: 0x00
+          bits: 16
+          name: _pad_torque_actual
+        - index: 0x6061
+          subindex: 0x00
+          bits: 8
+          name: _pad_opmode_disp
+        - index: 0x60FD
+          subindex: 0x00
+          bits: 32
+          name: digital_in
+        - index: 0x603F
+          subindex: 0x00
+          bits: 16
+          name: error_code
