@@ -1,0 +1,15 @@
+devices:
+    - device:
+      name: A
+      vendor-id: 0             # Changed to 0
+      product-code: 0          # Changed to 0
+      #use rpm const=120000.006 for a6minas,10 for delta 
+      # rpm-const and drive-x-ratio removed — now auto-injected from drive YAML motion: section
+      alias: 0                 # Keep ring alias
+      id: 0                    # Keep ring position (0 = first drive on cable)
+      drive-type: "auto"       # ADD THIS: Tells the software to auto-discover
+      address-config-name: ""  # Leave blank, system will inject this
+      address-config-file: ""  # Leave blank, system will inject this
+      pot-not-threshold: 1.5
+      stop-when-hardware-potnot: true
+      io-poll-interval: 10000

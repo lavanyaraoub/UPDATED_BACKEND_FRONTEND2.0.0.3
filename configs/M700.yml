@@ -1,0 +1,288 @@
+# ==================================================================
+# NIDEC M700 EtherCAT Configuration
+# ==================================================================
+ethercat:
+  - operation:
+    name: configure
+    steps:
+      - step:
+        name: "operation mode (CSP)"
+        address: 0x6060
+        subindex: 0x00
+        value: "8"
+        delay: 0
+        isBinary: false
+        dataType: "U8"
+      - step:
+        name: "interpolation time period value"
+        address: 0x60C2
+        subindex: 0x01
+        value: "1"
+        delay: 0
+        isBinary: false
+        dataType: "U8"
+      - step:
+        name: "interpolation time period index"
+        address: 0x60C2
+        subindex: 0x02
+        value: "-3"
+        delay: 0
+        isBinary: false
+        dataType: "I8"
+
+  - operation:
+    name: poweron
+    steps:
+      - step:
+        name: "drive init"
+        address: 0x6040
+        subindex: 0x00
+        value: "6"
+        delay: 0
+        isBinary: false
+        dataType: "U16"
+        action: "write"
+      - step:
+        name: "drive magnetize"
+        address: 0x6040
+        subindex: 0x00
+        value: "7"
+        delay: 0
+        isBinary: false
+        dataType: "U16"
+        action: "write"
+
+  - operation:
+    name: powerOff
+    steps:
+      - step:
+        name: "power off"
+        address: 0x6040
+        subindex: 0x00
+        value: "6"
+        delay: 0
+        isBinary: false
+        dataType: "U16"
+        action: "write"
+
+  - operation:
+    name: fastPowerOff
+    steps:
+      - step:
+        name: "fast poweroff"
+        address: 0x6040
+        subindex: 0x00
+        value: "6"
+        delay: 0
+        isBinary: false
+        dataType: "U16"
+        action: "write"
+
+  - operation:
+    name: reset
+    steps:
+      - step:
+        name: "reset driver"
+        address: 0x6040
+        subindex: 0x00
+        value: "128"
+        delay: 0
+        isBinary: false
+        dataType: "U16"
+        action: "write"
+
+  - operation:
+    name: faultReset
+    steps:
+      - step:
+        name: "fault reset low"
+        address: 0x6040
+        subindex: 0x00
+        value: "0"
+        delay: 50
+        isBinary: false
+        dataType: "U16"
+        action: "write"
+      - step:
+        name: "fault reset high"
+        address: 0x6040
+        subindex: 0x00
+        value: "128"
+        delay: 200
+        isBinary: false
+        dataType: "U16"
+        action: "write"
+
+  - operation:
+    name: resetMultiTurn
+    steps:
+      - step:
+        name: "reset multi-turn position"
+        address: 0x2003
+        subindex: 0x33
+        value: "1"
+        delay: 500
+        isBinary: false
+        dataType: "U8"
+        action: "write"
+
+  - operation:
+    name: readError
+    steps:
+      - step:
+        name: "read error from the driver"
+        address: 0x603F
+        subindex: 0x00
+        value: "0xFFFF"
+        delay: 0
+        isBinary: false
+        dataType: "U16"
+        action: "read"
+
+  - operation:
+    name: ecs
+    steps:
+
+  - operation:
+    name: hard_reset
+    steps:
+
+  - operation:
+    name: finsignal
+    steps:
+
+  - operation:
+    name: readStatusword
+    steps:
+      - step:
+        name: "read statusword"
+        address: 0x6041
+        subindex: 0x00
+        value: "0xFFFF"
+        delay: 0
+        isBinary: false
+        dataType: "U16"
+        action: "read"
+
+  - operation:
+    name: finsignalend
+    steps:
+
+  - operation:
+    name: break_on
+    steps:
+
+  - operation:
+    name: break_off
+    steps:
+
+  - operation:
+    name: emergency
+    steps:
+
+  - operation:
+    name: reverse
+    steps:
+      - step:
+        name: "Activate reverse direction"
+        address: 0x607E
+        subindex: 0x00
+        value: "224"
+        delay: 0
+        isBinary: false
+        dataType: "U8"
+        action: "write"
+
+  - operation:
+    name: non_reverse
+    steps:
+      - step:
+        name: "Activate non reverse direction"
+        address: 0x607E
+        subindex: 0x00
+        value: "0"
+        delay: 0
+        isBinary: false
+        dataType: "U8"
+        action: "write"
+
+# ==================================================================
+# PDO DYNAMIC MAPPING 
+# ==================================================================
+# ============================================================
+# motion: — Drive-hardware motion parameters
+# See a6minas.yml for field descriptions.
+#
+# Nidec M700:
+#   rpm_const and drive_x_ratio must be verified against the
+#   physical drive encoder configuration (M700 parameter settings).
+#   Values below match the A6 as a safe starting point — update
+#   once M700 encoder resolution is confirmed.
+# ============================================================
+motion:
+  rpm_const: 120000
+  drive_x_ratio: 20000
+
+pdo:
+  # dc_assign_activate: Distributed Clock sync assignment.
+  # Set to 0 to preserve existing behaviour (DC sync not configured).
+  # The Nidec M700 was working without DC sync before this field was
+  # introduced. Only change this if you are seeing timing-related faults
+  # on this drive. For reference: 0x0300 enables SYNC0+SYNC1 (1ms cycle).
+  dc_assign_activate: 0x0000
+  sync_managers:
+    - sm: 2
+      direction: output
+      watchdog: enable
+      pdo_index: 0x1600
+      entries:
+        - index: 0x6040
+          subindex: 0x00
+          bits: 16
+          name: ctrl_word
+        - index: 0x607A
+          subindex: 0x00
+          bits: 32
+          name: target_pos
+        - index: 0x60FF
+          subindex: 0x00
+          bits: 32
+          name: target_vel
+        - index: 0x6071
+          subindex: 0x00
+          bits: 16
+          name: _pad_torque
+        - index: 0x6060
+          subindex: 0x00
+          bits: 8
+          name: op_mode
+          
+    - sm: 3
+      direction: input
+      watchdog: disable
+      pdo_index: 0x1A00
+      entries:
+        - index: 0x6041
+          subindex: 0x00
+          bits: 16
+          name: status_word
+        - index: 0x6064
+          subindex: 0x00
+          bits: 32
+          name: actual_pos
+        - index: 0x606C
+          subindex: 0x00
+          bits: 32
+          name: actual_vel
+        - index: 0x6077
+          subindex: 0x00
+          bits: 16
+          name: _pad_torque_actual
+        - index: 0x6061
+          subindex: 0x00
+          bits: 8
+          name: _pad_opmode_disp
+        - index: 0x603F
+          subindex: 0x00
+          bits: 16
+          name: error_code

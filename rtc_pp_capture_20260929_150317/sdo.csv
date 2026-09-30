@@ -1,0 +1,1 @@
+time,reason,log_goal,sw,mode,demand,actual,target,following_error,window,window_time,profile_velocity,profile_accel,profile_decel,residual,bit10,within_window

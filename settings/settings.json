@@ -1,0 +1,159 @@
+{
+	"A": {
+		"back_lash": "0.000",
+		"binary_pos_feed": [
+			{
+				"binary": "0000",
+				"pos": "10.000",
+				"dir": 1,
+				"feed_rate": 20
+			},
+			{
+				"binary": "0001",
+				"pos": "40.000",
+				"dir": 1,
+				"feed_rate": "8"
+			},
+			{
+				"binary": "0010",
+				"pos": "260.000",
+				"dir": 0,
+				"feed_rate": "8"
+			},
+			{
+				"binary": "0011",
+				"pos": "10.000",
+				"dir": 1,
+				"feed_rate": 20
+			},
+			{
+				"binary": "0100",
+				"pos": "10.000",
+				"dir": 1,
+				"feed_rate": 20
+			},
+			{
+				"binary": "0101",
+				"pos": "10.000",
+				"dir": 1,
+				"feed_rate": 20
+			},
+			{
+				"binary": "0110",
+				"pos": "10.000",
+				"dir": 1,
+				"feed_rate": 20
+			},
+			{
+				"binary": "0111",
+				"pos": "10.000",
+				"dir": 1,
+				"feed_rate": 20
+			},
+			{
+				"binary": "1000",
+				"pos": "10.000",
+				"dir": 1,
+				"feed_rate": 20
+			},
+			{
+				"binary": "1001",
+				"pos": "10.000",
+				"dir": 1,
+				"feed_rate": 20
+			},
+			{
+				"binary": "1010",
+				"pos": "10.000",
+				"dir": 1,
+				"feed_rate": 20
+			},
+			{
+				"binary": "1011",
+				"pos": "10.000",
+				"dir": 1,
+				"feed_rate": 20
+			},
+			{
+				"binary": "1100",
+				"pos": "10.000",
+				"dir": 1,
+				"feed_rate": 20
+			},
+			{
+				"binary": "1101",
+				"pos": "10.000",
+				"dir": 1,
+				"feed_rate": 20
+			},
+			{
+				"binary": "1111",
+				"pos": "10.000",
+				"dir": 1,
+				"feed_rate": 20
+			}
+		],
+		"cl_dl": 0,
+		"cldl_timing": "3000",
+		"ecs": 0,
+		"encoder_zero_apos": 37899,
+		"fin_signal": 1,
+		"g54": "3.14",
+		"g55": 0,
+		"g56": 0,
+		"g57": 0,
+		"g58": 0,
+		"g59": 0,
+		"gear_ratio": "1:90",
+		"home_dir": 1,
+		"homing_apos": 37899,
+		"homing_done": true,
+		"homing_drive_x_ratio": 20000,
+		"homing_offset": "0",
+		"homing_valid": true,
+		"jog_feed": "3",
+		"motor_dir": 1,
+		"not": "0",
+		"pitch_error": [
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			"0",
+			0
+		],
+		"pot": "0",
+		"timing": "500",
+		"work_offset": 0
+	}
+}

@@ -1,0 +1,25 @@
+# Go build files
+*.exe
+*.test
+*.out
+coverage*.out
+
+# Logs and reports
+*.log
+test-reports/
+report.html
+summary.json
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# OS/editor files
+.DS_Store
+.vscode/
+.idea/
+
+# Build binaries
+jamun
+EtherCAT

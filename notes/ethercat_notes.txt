@@ -1,0 +1,40 @@
+notes when reading igh ethercatmaster documentation https://www.etherlab.org/download/ethercat/ethercat-1.5.2.pdf
+
+any time a mater starts should create a domain. Like below
+domain0 = ecrt_master_create_domain(drive_master[cnt]);
+
+Need to do slave configuration
+The application has to tell the master about the expected bus topology. This can
+be done by creating “slave configurations”. A slave configuration can be seen as an
+expected slave. When a slave configuration is created, the application provides the
+bus position (see below), vendor id and product code.
+When the bus configuration is applied, the master checks, if there is a slave with
+the given vendor id and product code at the given position. If this is the case,
+the slave configuration is “attached” to the real slave on the bus and the slave is
+configured according to the settings provided by the application. 
+
+page 12
+
+excert from drive_interface.c (page 2234)
+here is SLAVE_DRIVE_0 and MAXON_EPOS3 as below
+//* Vendor ID:       0x0000066f
+//* Product code:    0x535300a1
+#define SLAVE_DRIVE_0 0, 0
+#define MAXON_EPOS3 0x0000066f, 0x535300a1
+NOTE: This should go as configuration
+
+    if(!(sc_epos3 = ecrt_master_slave_config(drive_master[cnt], SLAVE_DRIVE_0, MAXON_EPOS3))){
+      fprintf(stderr, "Failed to get slave configuration for drive %d. \n", drive_master[cnt]);
+      sprintf(str, "FAIL %d", cnt);
+      zmq_send (requester, str, 6, 0);
+      return -1;
+    }
+
+drive_interface.c
+receiverQueue() line# 1548 does all different task like reset etc
+tcpserver.js
+writeToEthercatClient("1 13 0\n"); is requesting action to do and receiverQueue does it
+
+tcpserver.js line # 1257 does the execution Axx
+
+POT and NOT limit check tcpserver.js  line number 325
