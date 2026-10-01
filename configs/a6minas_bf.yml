@@ -38,7 +38,7 @@ ethercat:
           name: "profile velocity"
           address: 0x6081
           subindex: 0x00
-          value: "7200000"
+          value: "1000000"
           delay: 0
           isBinary: false
           dataType: "U32"
@@ -568,8 +568,8 @@ ethercat:
 #                A6 Minas with 20-bit encoder: 20000
 # ============================================================
 motion:
-  rpm_const: 720000    # 17-bit encoder, gear ratio 1:90 (1333.3334 * 90)
-  drive_x_ratio: 120000 # 17-bit encoder, gear ratio 1:90
+  rpm_const: 90000.0048   # 17-bit encoder, gear ratio 1:90 (1333.3334 * 90)
+  drive_x_ratio: 20000 # 17-bit encoder, gear ratio 1:90
 
 pdo:
   # DC sync: locks SYNC0/SYNC1 events to the EtherCAT master reference clock.
@@ -623,7 +623,7 @@ pdo:
         - index: 0x6061
           subindex: 0x00
           bits: 8
-          name: op_mode_disp
+          name: op_mode_display
         - index: 0x6064
           subindex: 0x00
           bits: 32

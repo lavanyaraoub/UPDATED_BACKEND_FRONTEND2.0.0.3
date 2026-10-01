@@ -106,7 +106,7 @@ func IdentifyDrive(vendorID, productCode uint32) (AutoDiscoveryProfile, error) {
 	// but the BF model has different motion parameters (rpm_const, drive_x_ratio)
 	// due to its 17-bit encoder and 1:90 gearbox ratio.
 	case vendorID == 0x0000066F && (productCode == 0x613c0008||
-		productCode == 0x613c0017):
+		productCode == 0x613c0017 || productCode == 0x60380009):
 		profile = AutoDiscoveryProfile{
 			DriveType:         "a6_minas",
 			AddressConfigName: "a6minas_bf",

@@ -379,12 +379,10 @@ func runPositionGoal(masterDevice *MasterDevice, goal int32, targetKind string) 
 	logger.Info("[PDO] Starting rotation in PP mode targetKind=", targetKind,
 		" goal=", goal)
 
-	if err := FastPowerOn(masterDevice); err != nil {
-		logger.Error("[PDO-PP] FastPowerOn failed:", err)
-		statusnotifier.Alarm(err.Error())
-		return err
-	}
-
+	// Do not call FastPowerOn here. Once PDO cyclic control is active, the
+	// CiA-402 cyclic task owns servo state. FastPowerOn calls pdoStopMotion(),
+	// which disables the active PDO motion modes and can introduce a transient
+	// standby cycle immediately before the Profile Position command.
 	envSettings := settings.GetDriverSettings(masterDevice.Name)
 	if _, declampErr := hasDeclamped(masterDevice, envSettings); declampErr != nil {
 		logger.Error("[PDO-PP] doRotate: declamp failed, aborting move:", declampErr)

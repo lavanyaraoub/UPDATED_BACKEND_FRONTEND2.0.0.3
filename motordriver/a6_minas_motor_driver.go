@@ -533,14 +533,14 @@ func (a6 A6Minas) FaultResetControlword() uint16 {
 	return 0x0080
 }
 
-// StandbyOpMode returns Mode 3 (Profile Velocity, vel=0) for A6 standby.
+// StandbyOpMode returns Mode 1 (Profile Position) for Panasonic A6 standby.
 //
-// Mode 8 (CSP) is NOT used for A6: the A6 reinitialises its position controller
-// on a mode 3→8 transition and fires a correction-torque pulse — causing a
-// visible jerk even when the motor is already stopped. Mode 3 vel=0 holds
-// position silently via the velocity loop with zero mode-switch overhead.
+// PP is the primary mode for RTC indexing. Keeping the drive in Mode 1 while
+// idle avoids unnecessary Mode 3 <-> Mode 1 transitions between consecutive
+// position commands. The cyclic standby branch keeps bit4 LOW and holds the
+// current actual position, so no new PP set-point is triggered while idle.
 func (a6 A6Minas) StandbyOpMode() int8 {
-	return 3
+	return 1
 }
 
 // SupportsMultiTurnReset returns true — the Panasonic A6 supports multi-turn
