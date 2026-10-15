@@ -7,6 +7,7 @@ package main
 import "C"
 import (
 	"EtherCAT/channels"
+	"EtherCAT/cmmlink"
 	socket "EtherCAT/clientcommunication"
 	"EtherCAT/constants"
 	executors "EtherCAT/executors"
@@ -116,6 +117,10 @@ func main() {
 		os.Exit(0)
 	}
 
+	// BPF poller runs its GM file through the executor. Must be registered
+	// before InitMaster(), which starts the BPF poller.
+	channels.RegisterRunProgramFunc(executors.RunCodeFile)
+
 	err := motor.InitMaster()
 	if err != nil {
 		logger.Error("EtherCAT initialization failed:", err)
@@ -133,6 +138,9 @@ func main() {
 
 	// Start the RS-232 listener without blocking GPIO startup or shutdown handling.
 	go serialtest.StartSerialListener()
+
+	// Start the CMM Ethernet API listener (192.168.2.10:5100).
+	go cmmlink.Start()
 
 	// 🔹 START GPIO HANDLER HERE
 	go startGPIOHandler()

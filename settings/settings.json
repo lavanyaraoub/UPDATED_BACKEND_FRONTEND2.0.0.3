@@ -3,8 +3,8 @@
 		"back_lash": "0.004",
 		"binary_pos_feed": [
 			{
-				"binary": "0000",
-				"pos": "10.000",
+				"binary": "1110",
+				"pos": "45",
 				"dir": 1,
 				"feed_rate": 20
 			},
@@ -28,37 +28,37 @@
 			},
 			{
 				"binary": "0100",
-				"pos": "10.000",
+				"pos": "20",
 				"dir": 1,
 				"feed_rate": 20
 			},
 			{
 				"binary": "0101",
-				"pos": "10.000",
+				"pos": "11",
 				"dir": 1,
 				"feed_rate": 20
 			},
 			{
 				"binary": "0110",
-				"pos": "10.000",
+				"pos": "10.500",
 				"dir": 1,
 				"feed_rate": 20
 			},
 			{
 				"binary": "0111",
-				"pos": "10.000",
+				"pos": "120.534",
 				"dir": 1,
 				"feed_rate": 20
 			},
 			{
 				"binary": "1000",
-				"pos": "10.000",
+				"pos": "70.221",
 				"dir": 1,
 				"feed_rate": 20
 			},
 			{
 				"binary": "1001",
-				"pos": "10.000",
+				"pos": "90.888",
 				"dir": 1,
 				"feed_rate": 20
 			},
@@ -70,25 +70,25 @@
 			},
 			{
 				"binary": "1011",
-				"pos": "10.000",
+				"pos": "1",
 				"dir": 1,
 				"feed_rate": 20
 			},
 			{
 				"binary": "1100",
-				"pos": "10.000",
+				"pos": "12.845",
 				"dir": 1,
 				"feed_rate": 20
 			},
 			{
 				"binary": "1101",
-				"pos": "10.000",
+				"pos": "66.923",
 				"dir": 1,
 				"feed_rate": 20
 			},
 			{
 				"binary": "1111",
-				"pos": "10.000",
+				"pos": "270",
 				"dir": 1,
 				"feed_rate": 20
 			}
