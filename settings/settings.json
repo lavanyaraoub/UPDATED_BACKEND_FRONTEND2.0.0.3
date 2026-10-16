@@ -1,6 +1,6 @@
 {
 	"A": {
-		"back_lash": "0.004",
+		"back_lash": "0.000",
 		"binary_pos_feed": [
 			{
 				"binary": "0000",
@@ -108,7 +108,7 @@
 		"home_dir": 1,
 		"homing_apos": 302379,
 		"homing_done": true,
-		"homing_drive_x_ratio": 120000,
+		"homing_drive_x_ratio": 23302,
 		"homing_offset": "0",
 		"homing_valid": true,
 		"jog_feed": "3",

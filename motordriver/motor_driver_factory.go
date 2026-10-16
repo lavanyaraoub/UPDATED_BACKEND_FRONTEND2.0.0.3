@@ -23,6 +23,7 @@ var (
 	driverRegistry   = map[string]func() IMotorDriver{
 		"a6_minas":     func() IMotorDriver { return &A6Minas{} },
 		"delta_asda2e": func() IMotorDriver { return &DeltaASDA2E{} },
+		"inovance_sv680n": func() IMotorDriver { return &InovanceSV680N{} },
 		"Nidec":        func() IMotorDriver { return &NidecM700{} }, // Added Nidec M700 mapping
 	}
 )

@@ -140,6 +140,15 @@ func IdentifyDrive(vendorID, productCode uint32) (AutoDiscoveryProfile, error) {
 			AddressConfigName: "veichi_sd700",
 			AddressConfigFile: "/configs/veichi_sd700.yml",
 		}
+		// ── 5. Inovance SV680N-GINT (SV680NT012I) ──────────────────────────────
+	// Supports EoE + CoE — the eoe* interface must stay DOWN or SDOs fail.
+	// 0x608F not implemented; encoder resolution comes from the YAML.
+	case vendorID == 0x00100000 && productCode == 0x000C012A:
+		profile = AutoDiscoveryProfile{
+			DriveType:         "inovance_sv680n",
+			AddressConfigName: "inovance_sv680n",
+			AddressConfigFile: "/configs/inovance_sv680n.yml",
+		}
 
 	// ── 5. Future drives: add new case blocks here ────────────────────────
 
