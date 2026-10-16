@@ -3,23 +3,51 @@
 # EDITTING OF THIS FILE SHOULD BE DONE BY EXPERIENCED PERSONNEL ONLY
 # ANY CHANGE WITHOUT PROPER KNOWLEDGE OF ETHERCAT DEVICE ADDRESSING CAN CAUSE DAMAGE TO THE SYSTEM
 # ****************************************************************************************************
-# EtherCAT addressing configuration for Inovance SV680N-GINT (SV680NT012I).
+# EtherCAT addressing configuration for Inovance SV680N-GINT (SV680NT012I) + DDR motor (1:1).
 # VendorID: 0x00100000  ProductCode: 0x000C012A  Revision: 0x00010000
 # ESI: INOVANCE_SV680N-GINT_1Axis_V02.xml
 #
-# Key points (from ESI + bench reads):
+# Key points (from ESI + bench reads + SV680N Communication Guide A00):
 #  - Supports PP, PV, PT, HM, CSP, CSV, CST (0x6502 = 0x3AD)
 #  - Default RxPDO 0x1701 has NO 0x6060 -> we remap configurable 0x1600 / 0x1A00
 #  - 0x608F, 0x6092, 0x60C2 do NOT exist on this drive (no interpolation-period writes)
-#  - 0x6091 gear ratio = 1:1 at the drive; scaling is done in jamun (motion: section)
-#  - Digital inputs from standard 0x60FD (CiA-402: bit0 NOT, bit1 POT, bit2 HOME)
+#  - SCALING IS DONE IN THE DRIVE via 0x6091 (see "configure"):
+#        encoder counts = user units x 6091:01 / 6091:02
+#        1 user unit = 0.0001 deg  ->  3,600,000 units per table revolution
+#  - Digital inputs 0x60FD: bit0 NOT, bit1 POT, bit2 HOME, bit16..20 = DI1..DI5.
+#    Bits 3..15 are NOT USED on SV680N - never decode them.
 #    VERIFY polarity on the bench before enabling StopWhenHWPOTNOT.
 #  - Drive also supports EoE: the eoe* interface must stay DOWN or SDOs fail randomly.
+#  - 0x603F error code -> panel code "E" + 3 hex digits (0x0E08 = EE08 sync loss,
+#    0x0939 = E939 motor power cable disconnected).
 
 ethercat:
     - operation:
       name: configure
       steps:
+        # --- Drive-side scaling (0x6091 is writable only with servo OFF, PREOP) ---
+        # !!! VERIFY encoder resolution of the DDR before first move !!!
+        #   26-bit (67,108,864 counts/rev): 6091:01 = 524288 , 6091:02 = 28125  (default below)
+        #   23-bit ( 8,388,608 counts/rev): 6091:01 = 65536  , 6091:02 = 28125
+        #   Other:  6091:01 / 6091:02 = counts_per_rev / 3600000 (reduced fraction)
+        # To measure: temporarily set both to 1, rotate exactly one revolution,
+        # counts_per_rev = change of 0x6064.
+        - step:
+          name: "gear ratio motor revolutions"
+          address: 0x6091
+          subindex: 0x01
+          value: "524288"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+        - step:
+          name: "gear ratio shaft revolutions"
+          address: 0x6091
+          subindex: 0x02
+          value: "28125"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
         - step:
           name: "operation mode (PP)"
           address: 0x6060
@@ -28,18 +56,31 @@ ethercat:
           delay: 0
           isBinary: false
           dataType: "U8"
+        # Units below are 0.0001 deg/s and 0.0001 deg/s^2.
         - step:
           name: "profile velocity"
           address: 0x6081
           subindex: 0x00
-          value: "10000000"
+          value: "600000"
           delay: 0
           isBinary: false
           dataType: "U32"
-        # TODO(bench): 0x6083 / 0x6084 (profile accel/decel) exist on this drive.
-        # Read the drive defaults first, then add explicit values here if needed:
-        #   ethercat upload -p 0 -t uint32 0x6083 0
-        #   ethercat upload -p 0 -t uint32 0x6084 0
+        - step:
+          name: "profile acceleration"
+          address: 0x6083
+          subindex: 0x00
+          value: "3600000"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+        - step:
+          name: "profile deceleration"
+          address: 0x6084
+          subindex: 0x00
+          value: "3600000"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
     - operation:
       name: poweron
       steps:
@@ -155,13 +196,27 @@ ethercat:
           dataType: "UINT"
           action: "read"
     - operation:
+      # Fault reset needs a REAL 0->1 edge on bit 7.
+      # Old version wrote 0x8F twice (no edge the second time).
+      # Sequence now: 0x06 (bit7 low) -> 0x86 (bit7 high = edge) -> 0x06 (release).
+      # Note: EE08 (sync loss) cannot clear in PREOP; it clears after OP + DC sync
+      # (jamun does the PDO fault reset after the cyclic task starts).
       name: faultReset
       steps:
         - step:
-          name: "fault reset"
+          name: "fault reset low"
           address: 0x6040
           subindex: 0x00
-          value: "10001111"
+          value: "00000110"
+          delay: 20000
+          isBinary: true
+          dataType: "U16"
+          action: "write"
+        - step:
+          name: "fault reset rising edge"
+          address: 0x6040
+          subindex: 0x00
+          value: "10000110"
           delay: 150000
           isBinary: true
           dataType: "U16"
@@ -174,6 +229,15 @@ ethercat:
           dataType: "U32"
           action: "write"
         - step:
+          name: "fault reset release"
+          address: 0x6040
+          subindex: 0x00
+          value: "00000110"
+          delay: 20000
+          isBinary: true
+          dataType: "U16"
+          action: "write"
+        - step:
           name: "read current controlword"
           address: 0x6040
           subindex: 0x00
@@ -182,15 +246,6 @@ ethercat:
           isBinary: false
           dataType: "U16"
           action: "read"
-        - step:
-          name: "fault reset rising edge"
-          address: 0x6040
-          subindex: 0x00
-          value: "10001111"
-          delay: 150000
-          isBinary: true
-          dataType: "U16"
-          action: "write"
         - step:
           name: "CSP mode"
           address: 0x6060
@@ -281,6 +336,8 @@ ethercat:
       steps:
     - operation:
       # No hardware reset input mapped for SV680N v1 — no-op.
+      # (The reset storm seen on 15-Oct came from the A6Minas I/O listener in code
+      #  decoding 0x60FD bit5, not from this file.)
       name: hard_reset
       steps:
     - operation:
@@ -341,18 +398,23 @@ ethercat:
 # motion: — Drive-hardware motion parameters
 # See a6minas.yml for field descriptions.
 #
-# !!! VERIFY BEFORE FIRST MOVE !!!
-# 0x608F does not exist on this drive, so encoder resolution must come
-# from the motor nameplate. Values below ASSUME a 23-bit encoder
-# (8,388,608 counts/rev) and a 120:1 table, same as the A6 23-bit config:
-#   drive_x_ratio = Feed x gear / 360 = 8,388,608 x 120 / 360 = 2,796,203
-#   rpm_const     = Feed x 1.5        = 12,582,912
-# Recompute if the motor is 26-bit (67,108,864) or the gear ratio differs.
+# DDR motor, 1:1, drive-side scaling via 0x6091 (configure section):
+#   1 user unit = 0.0001 deg, 3,600,000 units per revolution
+#   drive_x_ratio = 3,600,000 / 360 = 10000  (exact, no rounding)
+#   rpm_const     = drive_x_ratio x 4.5 = 45000
+#     (keeps the same deg/s per feed unit as the A6 23-bit/120:1 config:
+#      12,582,912 / 2,796,203 = 4.5)
+#     If feed must mean true table rpm, use 60000 (= 3,600,000 / 60).
+#
+# !!! AUTO-DISCOVER currently injects rpm_const=12582912 / drive_x_ratio=2796203
+# for product 0x000C012A and overrides these values — remove that injection
+# in code, otherwise this section is ignored.
+# !!! Stored HomingApos / work offsets in old units are invalid — re-home.
 # ============================================================
 motion:
-  rpm_const: 12582910.0
-  drive_x_ratio: 23302
-  
+  rpm_const: 45000.0
+  drive_x_ratio: 10000
+
 
 pdo:
   # dc_assign_activate from ESI (SYNC0). ESI also allows free-run (0x0000).
@@ -362,7 +424,7 @@ pdo:
     - sm: 2
       direction: output
       watchdog: enable
-      pdo_index: 0x1600        # configurable on SV680N (10 slots)
+      pdo_index: 0x1600        # configurable on SV680N (max 10 objects)
       entries:
         - index: 0x6040
           subindex: 0x00
@@ -391,7 +453,7 @@ pdo:
     - sm: 3
       direction: input
       watchdog: disable
-      pdo_index: 0x1A00        # configurable on SV680N
+      pdo_index: 0x1A00        # configurable on SV680N (max 10 objects)
       entries:
         - index: 0x6041
           subindex: 0x00
@@ -412,7 +474,7 @@ pdo:
         - index: 0x6061
           subindex: 0x00
           bits: 8
-          name: _pad_opmode_disp
+          name: op_mode_disp      # was _pad_opmode_disp -> caused "PDO setup failed"
         - index: 0x60FD
           subindex: 0x00
           bits: 32
