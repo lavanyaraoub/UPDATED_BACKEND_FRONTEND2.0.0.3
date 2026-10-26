@@ -1,0 +1,41 @@
+{
+  "files": {
+    "main.js": "/static/js/main.a685191f.js",
+    "static/js/21.b91b9b55.js": "/static/js/21.b91b9b55.js",
+    "static/media/MaterialCommunityIcons.ttf": "/static/media/MaterialCommunityIcons.a7629910d13716b7080c.ttf",
+    "static/media/Arimo-SemiBold.ttf": "/static/media/Arimo-SemiBold.e42418ac393d39450f56.ttf",
+    "static/media/Arimo-Medium.ttf": "/static/media/Arimo-Medium.595e68479fad02df8321.ttf",
+    "static/media/Arimo-Bold.ttf": "/static/media/Arimo-Bold.d8e7ed0afab2e491f174.ttf",
+    "static/media/Arimo-Regular.ttf": "/static/media/Arimo-Regular.d39eacce219de9e28917.ttf",
+    "static/media/bg.png": "/static/media/bg.4fcc32cb623e2609b577.png",
+    "static/media/Ionicons.ttf": "/static/media/Ionicons.3517aeaa34b2f8cd8eef.ttf",
+    "static/media/MaterialIcons.ttf": "/static/media/MaterialIcons.120b4c7bbd155bd0a04d.ttf",
+    "static/media/auto.png": "/static/media/auto.eedffa388a7d0a6cfa77.png",
+    "static/media/settings.png": "/static/media/settings.2b34dfd46544bf50efaa.png",
+    "static/media/setting3.png": "/static/media/setting3.228911512e4051eae23d.png",
+    "static/media/setting2.png": "/static/media/setting2.14f9a333adb12ca0515c.png",
+    "static/media/AntDesign.ttf": "/static/media/AntDesign.163adab9dbd7cb1ed12a.ttf",
+    "static/media/Entypo.ttf": "/static/media/Entypo.a10f41248184205e8db8.ttf",
+    "static/media/manual.png": "/static/media/manual.f2ec67d7b9efd18407f5.png",
+    "static/media/setting4.png": "/static/media/setting4.eede8e7962d433aed733.png",
+    "static/media/Feather.ttf": "/static/media/Feather.11cd1d79299f3bb42d00.ttf",
+    "static/media/program.png": "/static/media/program.3ef370e50ffaed769746.png",
+    "static/media/setting1.png": "/static/media/setting1.71f54e017cd4dac3dcfa.png",
+    "static/media/help.png": "/static/media/help.753f488cc53360103ac6.png",
+    "static/media/text_program_logo.png": "/static/media/text_program_logo.b07e11471ed3d426612d.png",
+    "static/media/logo.png": "/static/media/logo.12ec4dad37a718fbc526.png",
+    "static/media/lock.png": "/static/media/lock.435d5881f4defcaa99d1.png",
+    "favicon.ico": "/favicon.ico",
+    "index.html": "/index.html",
+    "favicon-32.png": "/favicon-32.png",
+    "favicon-16.png": "/favicon-16.png",
+    "manifest.json": "/manifest.json",
+    "serve.json": "/serve.json",
+    "main.a685191f.js.map": "/static/js/main.a685191f.js.map",
+    "21.b91b9b55.js.map": "/static/js/21.b91b9b55.js.map"
+  },
+  "entrypoints": [
+    "static/js/21.b91b9b55.js",
+    "static/js/main.a685191f.js"
+  ]
+}

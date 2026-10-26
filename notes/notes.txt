@@ -1,0 +1,182 @@
+$ su pi
+
+$ go build main.go
+
+$ sudo setcap cap_net_admin,cap_net_raw=eip main
+
+$ main -i eth0 -m "hello world"
+
+raspbian image used: https://downloads.raspberrypi.org/raspbian/images/raspbian-2020-02-07/
+
+ethercat c library https://github.com/ningfei/ethercat
+
+To install all go dependencies run $go get ./...
+
+Before doing below do sudo apt-get upgrade and follow raspbian build section
+
+setting up igh ethercat master in rpi: https://github.com/icshwi/etherlabmaster
+
+Current test pi is unable ssh from vscode because of armv61 not yet supported
+in order to connect using https://github.com/billziss-gh/sshfs-win
+
+Go through this post to use c code in go https://www.thegoldfish.org/2019/04/using-c-libraries-from-go/
+Make sure LD_LIBRARY_PATH set to EtherCat folder like below
+
+update the profile file as below
+nano ~/.profile
+PATH=$PATH:/home/pi/go/bin
+GOPATH=/home/pi/go
+#point the libethercatinterface.so file location, app needs this file to link to the ethercat c connector
+export LD_LIBRARY_PATH=/home/pi/go/src/EtherCAT:$LD_LIBRARY_PATH
+
+
+
+ethercat master doxygen file: https://etherlab.org/download/ethercat/ethercat-stable-1.0-r492-htmldoc/ecrt_8h.html
+
+
+More about hexdecimal integers: https://stackoverflow.com/a/8186974
+
+need some research
+interpolation
+back lash
+
+https://stackoverflow.com/questions/9271469/go-convert-string-which-represent-binary-number-into-int
+convert a binary string to int: https://play.golang.org/p/3FgIeu0L0Qa
+
+Ethercat command lines
+```
+ethercat pdos
+```
+
+If vs code keep asking pwd to connect to pi then
+rm -rf ~/home/.vscode-server/
+
+releases
+cd ~/go/src/release-cli
+$ ./release-cli release -z /home/pi/go/src/EtherCAT/release/jamun_v1.0.2.0.tar.gz -p ebaf0856-606e-11eb-95b7-00155da1e406 -v "1.0.2.0" -c "v1"
+$ ~/gosrc/src/release-cli/release-cli release -z ~/gosrc/src/EtherCAT/release/jamun_v1.0.33.0.tar.gz -p b2158d63-9724-4553-aa9d-3fcbc606cb57 -v "1.0.33.0" -c "v1"
+create license
+--------------
+~/go/src/ucam_license_manager/jamun_lic_manager license -c "UCAM Test2" -i 10000000efe0499b -u "Sony Arouje" -s
+
+
+running as a systemd service
+https://fabianlee.org/2017/05/21/golang-running-a-go-binary-as-a-systemd-service-on-ubuntu-16-04/
+
+open a web browser at the startup of rpi
+https://diyprojects.io/open-html-page-starting-raspberry-pi-os-chromium-browser-full-screen-kiosk-mode/#.YUweoeziuUk
+
+Binary to decimal converter
+https://www.rapidtables.com/convert/number/decimal-to-binary.html
+
+sudo apt-get update --allow-releaseinfo-change
+
+setting up adhoc hotspot
+https://www.raspberryconnect.com/projects/65-raspberrypi-hotspot-accesspoints/157-raspberry-pi-auto-wifi-hotspot-switch-internet
+
+hide mouse pointer from touch screen
+https://forums.raspberrypi.com/viewtopic.php?t=234879
+
+removed from a6 minas operations
+    - operation:
+      name: ecsStartFinSignal
+      steps:
+        - step:
+          name: "read current val from physical output"
+          address: 0x60FE
+          subindex: 0x01
+          value: "0xFFFF"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+          action: "read"
+        - step:
+          name: "write current val to bitmask 0x02"
+          address: 0x60FE
+          subindex: 0x02
+          value: "1000000000000000"
+          delay: 0
+          isBinary: true
+          dataType: "U32"
+          action: "write"
+        - step:
+          name: "write current val to physical output index 0x01"
+          address: 0x60FE
+          subindex: 0x01
+          value: "1000000000000000"
+          delay: 0
+          isBinary: true
+          dataType: "U32"
+          action: "write"
+
+
+TODO: add io_status sock emit with value
+{
+  ecs: 1 or 0
+  pot:
+  not
+
+}
+
+shows the status of the driver
+driver_status
+{
+  drive_name: "A"
+  data: 1 or 0
+}
+
+
+Test report: https://drive.google.com/file/d/106ALXLROhFahyS90UuPvYYrutiyHCAv4/view
+
+
+setting up adhoc hotspot
+https://www.raspberryconnect.com/projects/65-raspberrypi-hotspot-accesspoints/157-raspberry-pi-auto-wifi-hotspot-switch-internet
+
+sudo apt-get update --allow-releaseinfo-change
+sudo apt-get install hostapd
+sudo apt-get install dnsmasq
+sudo systemctl unmask hostapd
+sudo systemctl disable hostapd
+sudo systemctl disable dnsmasq
+
+sudo nano /etc/hostapd/hostapd.conf
+and add the below lines
+
+#2.4GHz setup wifi 80211 b,g,n
+interface=wlan0
+driver=nl80211
+ssid=UCAM
+hw_mode=g
+channel=8
+wmm_enabled=0
+macaddr_acl=0
+auth_algs=1
+ignore_broadcast_ssid=0
+wpa=2
+wpa_passphrase=1234567890
+wpa_key_mgmt=WPA-PSK
+wpa_pairwise=CCMP TKIP
+rsn_pairwise=CCMP
+
+#80211n - Change GB to your WiFi country code
+country_code=GB
+ieee80211n=1
+ieee80211d=1
+
+sudo nano /etc/default/hostapd
+Change:
+#DAEMON_CONF=""
+to
+DAEMON_CONF="/etc/hostapd/hostapd.conf"
+
+sudo nano /etc/dnsmasq.conf
+goto the bottom and add below lines
+
+#AutoHotspot config
+interface=wlan0
+bind-dynamic 
+server=8.8.8.8
+domain-needed
+bogus-priv
+dhcp-range=10.10.0.5,10.10.0.200,12h
+

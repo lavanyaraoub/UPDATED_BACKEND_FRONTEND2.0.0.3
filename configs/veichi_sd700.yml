@@ -1,0 +1,443 @@
+---
+# ****************************************************************************************************
+# EDITING OF THIS FILE SHOULD BE DONE BY EXPERIENCED PERSONNEL ONLY
+# ANY CHANGE WITHOUT PROPER KNOWLEDGE OF ETHERCAT DEVICE ADDRESSING CAN CAUSE DAMAGE TO THE SYSTEM
+# ****************************************************************************************************
+# EtherCAT addressing configuration for Veichi SD700 series drives.
+# VendorID: 0x00850104  ProductCode: 0x01030507
+#
+# The Veichi SD700 is structurally similar to the Delta ASDA-A2-E:
+#  - CiA-402 compliant (ProfileNo 402)
+#  - Standard CSP mode (0x6060=0x08) for position control
+#  - Standard 0x60FD for digital inputs (POT/NOT active-HIGH, CiA-402 convention)
+#  - No vendor-specific multiturn reset, clamp/declamp, or ECS objects
+#
+# PDO Layout (from SD700_ECAT ESI XML):
+#  RxPdo 0x1601 used for CSP+velocity: ctrl_word(16) + target_pos(32) + target_vel(32)
+#  TxPdo 0x1a01 used: status_word(16) + actual_pos(32) + actual_vel(32)
+#
+# Key differences from Delta ASDA-A2-E:
+#  - Veichi 0x1601 RxPdo already includes both target_pos and target_vel in one PDO
+#  - No dig_out_val (0x60FE) entry in the standard Veichi PDO set — omitted
+#  - No error_code (0x603F) in default TxPdo — read via SDO in readError operation
+#  - Acceleration/deceleration via 0x6083/0x6084 (test before enabling — some drives reject SDO write)
+
+ethercat:
+    - operation:
+      name: configure
+      steps:
+        - step:
+          name: "operation mode (CSP)"
+          address: 0x6060
+          subindex: 0x00
+          value: "8"
+          delay: 0
+          isBinary: false
+          dataType: "U8"
+        - step:
+          name: "interpolation time period value"
+          address: 0x60C2
+          subindex: 0x01
+          value: "1"
+          delay: 0
+          isBinary: false
+          dataType: "U8"
+        - step:
+          name: "interpolation time period index"
+          address: 0x60C2
+          subindex: 0x02
+          value: "253"
+          delay: 0
+          isBinary: false
+          dataType: "I8"
+        - step:
+          name: "target position"
+          address: 0x607A
+          subindex: 0x00
+          value: "100000"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+        - step:
+          name: "profile velocity"
+          address: 0x6081
+          subindex: 0x00
+          value: "1000000"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+    - operation:
+      name: poweron
+      steps:
+        - step:
+          name: "drive init"
+          address: 0x6040
+          subindex: 0x00
+          value: "0x0006"
+          delay: 100000
+          isBinary: false
+          dataType: "U16"
+        - step:
+          name: "drive magnetize"
+          address: 0x6040
+          subindex: 0x00
+          value: "7"
+          delay: 100000
+          isBinary: false
+          dataType: "U16"
+    - operation:
+      name: fastPowerOn
+      steps:
+        - step:
+          name: "fast poweron"
+          address: 0x6040
+          subindex: 0x00
+          value: "0000000000001111"
+          delay: 0
+          isBinary: true
+          dataType: "U16"
+          action: "write"
+    - operation:
+      name: fastPowerOff
+      steps:
+        - step:
+          name: "fast poweroff read"
+          address: 0x6040
+          subindex: 0x00
+          value: "0xFFFF"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "read"
+        - step:
+          name: "fast poweroff"
+          address: 0x6040
+          subindex: 0x00
+          value: "00000110"
+          delay: 0
+          isBinary: true
+          dataType: "U16"
+          action: "write"
+    - operation:
+      name: poweroff
+      steps:
+        - step:
+          name: "start power off"
+          address: 0x6040
+          subindex: 0x00
+          value: "11111111"
+          delay: 0
+          isBinary: true
+          dataType: "U16"
+        - step:
+          name: "power off"
+          address: 0x6040
+          subindex: 0x00
+          value: "00000110"
+          delay: 0
+          isBinary: true
+          dataType: "U16"
+    - operation:
+      name: manualjog
+      steps:
+        - step:
+          name: "target velocity"
+          address: 0x60FF
+          subindex: 0x00
+          # value will be populated by the system. Do not change the jog_rpm_placeholder string.
+          value: "jog_rpm_placeholder"
+          isBinary: false
+          dataType: "U32"
+          delay: 0
+        - step:
+          name: "operation mode (PV)"
+          address: 0x6060
+          subindex: 0x00
+          value: "0x3"
+          delay: 0
+          isBinary: false
+          dataType: "U8"
+    - operation:
+      name: stopjog
+      steps:
+        - step:
+          name: "target velocity"
+          address: 0x60FF
+          subindex: 0x00
+          value: "0"
+          isBinary: false
+          dataType: "U32"
+          delay: 0
+    - operation:
+      name: pollstatus
+      steps:
+        - step:
+          name: "poll status"
+          address: 0x6064
+          subindex: 0x00
+          value: "0xFFFF"
+          delay: 5000
+          isBinary: false
+          dataType: "UINT"
+          action: "read"
+    - operation:
+      name: faultReset
+      steps:
+        - step:
+          name: "fault reset"
+          address: 0x6040
+          subindex: 0x00
+          value: "10001111"
+          delay: 150000
+          isBinary: true
+          dataType: "U16"
+          action: "write"
+        - step:
+          name: "read current controlword"
+          address: 0x6040
+          subindex: 0x00
+          value: "0xFFFF"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "read"
+        - step:
+          name: "fault reset rising edge"
+          address: 0x6040
+          subindex: 0x00
+          value: "10001111"
+          delay: 150000
+          isBinary: true
+          dataType: "U16"
+          action: "write"
+        - step:
+          name: "CSP mode"
+          address: 0x6060
+          subindex: 0x00
+          value: "8"
+          delay: 0
+          isBinary: false
+          dataType: "U8"
+          action: "write"
+    - operation:
+      # Veichi SD700 has no multiturn reset via standard objects — no-op.
+      name: resetMultiTurn
+      steps:
+    - operation:
+      name: readinputsignal
+      steps:
+        - step:
+          name: "read digital inputs (0x60FD)"
+          address: 0x60FD
+          subindex: 0x00
+          value: "0xFFFFFFFF"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+          action: "read"
+    - operation:
+      name: jog
+      steps:
+        - step:
+          name: "set rotation status"
+          address: 0x6040
+          subindex: 0x00
+          value: "0x005f"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "write"
+        - step:
+          name: "read rotation status"
+          address: 0x6041
+          subindex: 0x00
+          value: "0xFFFF"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "read"
+    - operation:
+      name: moveToPosition
+      steps:
+        - step:
+          name: "move to position"
+          address: 0x607A
+          subindex: 0x00
+          value: "move_to_pos_val"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+          action: "write"
+    - operation:
+      name: setRPM
+      steps:
+        - step:
+          name: "set profile velocity"
+          address: 0x6081
+          subindex: 0x00
+          value: "rpm_val"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+          action: "write"
+    - operation:
+      name: readError
+      steps:
+        - step:
+          name: "read error from the driver (via SDO)"
+          address: 0x603F
+          subindex: 0x00
+          value: "0xFFFF"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "read"
+    - operation:
+      # Veichi SD700 has no ECS input in 0x60FD — no-op.
+      name: ecs
+      steps:
+    - operation:
+      # Veichi SD700 has no hardware reset input in 0x60FD — no-op.
+      name: hard_reset
+      steps:
+    - operation:
+      # Veichi SD700 has no digital output PDO — finish signal is a no-op.
+      name: finsignal
+      steps:
+    - operation:
+      name: readStatusword
+      steps:
+        - step:
+          name: "read statusword"
+          address: 0x6041
+          subindex: 0x00
+          value: "0xFFFF"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "read"
+    - operation:
+      name: finsignalend
+      steps:
+    - operation:
+      # Veichi SD700 has no brake solenoid via PDO — no-op.
+      name: break_on
+      steps:
+    - operation:
+      name: break_off
+      steps:
+    - operation:
+      name: emergency
+      steps:
+    - operation:
+      name: reverse
+      steps:
+        - step:
+          name: "Activate reverse direction"
+          address: 0x607E
+          subindex: 0x00
+          value: "224"
+          delay: 0
+          isBinary: false
+          dataType: "U8"
+          action: "write"
+    - operation:
+      name: nonreverse
+      steps:
+        - step:
+          name: "Activate non reverse direction"
+          address: 0x607E
+          subindex: 0x00
+          value: "0"
+          delay: 0
+          isBinary: false
+          dataType: "U8"
+          action: "write"
+
+# ============================================================
+# motion: — Drive-hardware motion parameters
+#
+# Veichi SD700:
+#   rpm_const:    Converts JogFeed to raw velocity counts.
+#                 SD700 default encoder resolution is 10000 counts/rev.
+#                 Formula same as Delta: targetVel = rpm_const × JogFeed.
+#                 Start with 10.0 (same as Delta ASDA-A2-E) and tune if jog
+#                 speed is wrong.
+#   drive_x_ratio: Encoder counts per output shaft revolution.
+#                  SD700 default: 10000 (confirm from Pr0.01 in drive parameters).
+# ============================================================
+motion:
+  rpm_const: 10
+  drive_x_ratio: 10000
+
+# ============================================================
+# PDO Layout — Veichi SD700 ECAT
+#
+# Using RxPdo 0x1601 (ctrl_word + target_pos + target_vel + op_mode) and
+# TxPdo 0x1a01 (status_word + actual_pos + actual_vel).
+#
+# CRITICAL: op_mode (0x6060) MUST be mapped in the RxPDO. The generic PDO
+# engine (pdo_setup.go) requires ctrl_word + op_mode + target_pos +
+# target_vel all present to set PdoRxReady=true. Without op_mode mapped,
+# PdoRxReady/PdoJogReady/PdoPosReady all stay false and jog/position moves
+# are silently refused ("[JOG] PDO not active or RxPDO not ready").
+#
+# The SD700 ESI's four predefined RxPdo groupings (0x1600-0x1603) don't
+# offer this exact combination in one group — 0x1600 has op_mode but no
+# target_vel, 0x1601 has target_vel but no op_mode. This is fine: the PDO
+# engine writes a dynamic PDO mapping via SDO (like Delta's YAML does with
+# 6 entries under 0x1600, more than the SD700 ESI's default too), so any
+# combination of individually-mappable objects can be assigned under a
+# chosen pdo_index as long as total bits fit the sync manager.
+#
+# This is the most complete standard PDO set offered by the SD700 ESI.
+# The 0x60FD digital inputs are NOT in Veichi's default TxPdo 0x1a01 —
+# they appear only in TxPdo 0x1a00 alongside Touch Probe objects.
+# We add 0x60FD from TxPdo 0x1a00 here by combining the useful entries.
+#
+# If the drive rejects this custom PDO mapping, fall back to using only
+# 0x1a00 as TxPdo and adjust the sm3 entries accordingly.
+# ============================================================
+pdo:
+  # dc_assign_activate: 0 = no Distributed Clock sync (safe default).
+  # Enable 0x0300 (SYNC0+SYNC1) only if timing faults appear.
+  dc_assign_activate: 0x0000
+  sync_managers:
+    - sm: 2
+      direction: output
+      watchdog: enable
+      pdo_index: 0x1601
+      entries:
+        - index: 0x6040
+          subindex: 0x00
+          bits: 16
+          name: ctrl_word
+        - index: 0x607A
+          subindex: 0x00
+          bits: 32
+          name: target_pos
+        - index: 0x60FF
+          subindex: 0x00
+          bits: 32
+          name: target_vel
+        - index: 0x6060
+          subindex: 0x00
+          bits: 8
+          name: op_mode
+    - sm: 3
+      direction: input
+      watchdog: disable
+      pdo_index: 0x1a01
+      entries:
+        - index: 0x6041
+          subindex: 0x00
+          bits: 16
+          name: status_word
+        - index: 0x6064
+          subindex: 0x00
+          bits: 32
+          name: actual_pos
+        - index: 0x606C
+          subindex: 0x00
+          bits: 32
+          name: actual_vel

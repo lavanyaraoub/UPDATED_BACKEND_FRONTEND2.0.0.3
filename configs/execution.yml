@@ -1,0 +1,86 @@
+---
+execution:
+    command:
+        - cmd: G01
+          func: g01
+          description: start with given feed rate
+          considerInBlockExecution: 0
+        - cmd: G0
+          func: g0
+          description: start with full feed rate
+          considerInBlockExecution: 0
+        - cmd: F**
+          func: rpm
+          etherCatRegister: 02h
+          description: increment rpm
+          considerInBlockExecution: 0
+        - cmd: P**
+          func: performDivideBy360
+          description: Number of dividend is 10, so 360/10=36 equal degrees segments
+          considerInBlockExecution: 0
+        - cmd: D**
+          func: delay
+          description: delay n second
+          considerInBlockExecution: 0
+        - cmd: G90
+          func: g90
+          description: enable/disble absolute degree mode
+          considerInBlockExecution: 0
+        - cmd: A**
+          func: moveRotaryDegree
+          driveId: 0
+          description: rotary table moves to ** degree position
+          considerInBlockExecution: 1
+        - cmd: B**
+          func: moveRotaryDegree
+          driveId: 1
+          description: rotary table moves to ** degree position
+          considerInBlockExecution: 1
+        - cmd: G91
+          func: g91
+          description: incremental mode on.
+          considerInBlockExecution: 0
+        - cmd: R**
+          func: loopStart
+          description: start a loop
+          considerInBlockExecution: 0
+        - cmd: G10
+          func: loopEnd
+          description: end a loop
+          considerInBlockExecution: 0
+        - cmd: H**
+          func: performDivideBy360
+          description: Number of dividend is 10, so 360/10=36 equal degrees segments
+          considerInBlockExecution: 0
+        - cmd: INVALID
+          func: invalidCommand
+          description: An invalid command found
+          considerInBlockExecution: 0
+        - cmd: G68
+          func: g68
+          description: enable shortest path
+          considerInBlockExecution: 0
+        - cmd: G69
+          func: g69
+          description: disable shortest path
+          considerInBlockExecution: 0
+        - cmd: M30
+          func: m30
+          description: end of program execution
+          considerInBlockExecution: 0
+        - cmd: M99
+          func: m99
+          description: start execution from beginning
+          considerInBlockExecution: 0
+        - cmd: G17
+          func: g17
+          description: macro for dividing degree segments equally
+          considerInBlockExecution: 1
+        - cmd: G16
+          func: g16
+          description: macro for dividing 360 degree equally
+          considerInBlockExecution: 1
+        - cmd: G53|G54|G55|G56|G57|G58
+          func: workoffset
+          description: activate workoffset
+          considerInBlockExecution: 0

@@ -1,0 +1,625 @@
+---
+# ****************************************************************************************************
+# EDITTING OF THIS FILE SHOULD BE DONE BY EXPERIENCED PERSONNEL ONLY
+# ANY CHANGE WITHOUT PROPER KNOWLEDGE OF ETHERCAT DEVICE ADDRESSING CAN CAUSE DAMAGE TO THE SYSTEM
+# ****************************************************************************************************
+# this file controls the addressing of ethercat device
+# name's value should never change, for e.g. name: configure should never change it to any thing else
+# step is an array and can add more step or remove existing step
+# for eg when configure operation executes, it will execute all the steps mentioned in configure step
+# In case of any delay needs after each step then mention the delay in microseconds.
+
+# Ethercat instruction for
+# Panasonic Minias A6 series drives
+
+ethercat:
+    - operation:
+      name: configure
+      steps:
+        - step:
+          name: "operation mode"
+          address: 0x6060
+          subindex: 0x00
+          value: "0x1"
+          delay: 0
+          isBinary: false
+          dataType: "U8"
+        - step:
+          name: "target position"
+          address: 0x607A
+          subindex: 0x00
+          value: "100000"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+        - step:
+          name: "profile velocity"
+          address: 0x6081
+          subindex: 0x00
+          value: "7000000"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+        - step:
+          name: "profile acceleration"
+          address: 0x6083
+          subindex: 0x00
+          value: "100000000"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+        - step:
+          name: "profile deceleration"
+          address: 0x6084
+          subindex: 0x00
+          value: "100000000"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+        - step:
+          name: "drive mode"
+          address: 0x60F2
+          subindex: 0x00
+          value: "2"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+    - operation:
+      name: poweron
+      steps:
+        - step:
+          name: "drive init"
+          address: 0x6040
+          subindex: 0x00
+          value: "0x0006"
+          delay: 100000
+          isBinary: false
+          dataType: "U16"
+        - step:
+          name: "drive magnetize"
+          address: 0x6040
+          subindex: 0x00
+          value: "7"
+          delay: 100000
+          isBinary: false
+          dataType: "U16"
+    - operation:
+      name: fastPowerOn
+      steps:
+        - step:
+          name: "fast poweron"
+          address: 0x6040
+          subindex: 0x00
+          value: "0000000000001111"
+          delay: 0
+          isBinary: true
+          dataType: "U16"
+          action: "write"
+    - operation:
+      name: fastPowerOff
+      steps:
+        - step:
+          name: "fast poweroff read"
+          address: 0x6040
+          subindex: 0x00
+          value: "0xFFFF"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "read"        
+        - step:
+          name: "fast poweroff"
+          address: 0x6040
+          subindex: 0x00
+          value: "00000110"
+          delay: 0
+          isBinary: true
+          dataType: "U16"
+          action: "write"
+    - operation:
+      name: poweroff
+      steps:
+        - step:
+          name: "start power off"
+          address: 0x6040
+          subindex: 0x00
+          value: "11111111"
+          delay: 0
+          isBinary: true
+          dataType: "U16"
+        - step:
+          name: "power off"
+          address: 0x6040
+          subindex: 0x00
+          value: "00000110"
+          delay: 0
+          isBinary: true
+          dataType: "U16"
+    - operation:
+      name: manualjog
+      steps:
+        # - step:
+        #   name: "profile acceleration"
+        #   address: 0x6083
+        #   subindex: 0x00
+        #   value: "100000000"
+        #   isBinary: false
+        #   dataType: "U32"
+        #   delay: 0
+        # - step:
+        #   name: "profile deceleration"
+        #   address: 0x6084
+        #   subindex: 0x00
+        #   value: "100000000"
+        #   isBinary: false
+        #   dataType: "U32"
+        #   delay: 0
+        - step:
+          name: "target velocity"
+          address: 0x60FF
+          subindex: 0x00
+          #value will be populated by the system. Dont change the jog_rpm_placeholder to any other string.
+          value: "jog_rpm_placeholder"
+          isBinary: false
+          dataType: "U32"
+          delay: 0
+        - step:
+          name: "operation mode"
+          address: 0x6060
+          subindex: 0x00
+          value: "0x3"
+          delay: 0
+          isBinary: false
+          dataType: "U8"          
+    - operation:
+      name: stopjog
+      steps:      
+        - step:
+          name: "target velocity"
+          address: 0x60FF
+          subindex: 0x00
+          value: "0"
+          isBinary: false
+          dataType: "U32"
+          delay: 0      
+    - operation:
+      name: pollstatus
+      steps:
+        - step:
+          name: "poll status"
+          address: 0x6064
+          subindex: 0x00
+          value: "0xFFFF"
+          delay: 5000
+          isBinary: false
+          dataType: "UINT"
+          action: "read"
+    - operation:
+      name: faultReset
+      steps:
+        - step:
+          name: "read current value"
+          address: 0x6040
+          subindex: 0x00
+          value: "0xFFFF"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "read"
+        - step:
+          name: "fault reset"
+          address: 0x6040
+          subindex: 0x00
+          value: "11001111"
+          delay: 150000
+          isBinary: true
+          dataType: "U16"
+          action: "write"
+        - step:
+          name: "set brake 1"
+          address: 0x60FE
+          subindex: 0x02
+          value: "0"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+          action: "write"
+        - step:
+          name: "set brake 2"
+          address: 0x60FE
+          subindex: 0x01
+          value: "0"
+          delay: 500000
+          isBinary: false
+          dataType: "U32"
+          action: "write"
+        - step:
+          name: "set brake 2 again"
+          address: 0x60FE
+          subindex: 0x01
+          value: "0"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+          action: "write"
+        - step:
+          name: "PP Mode"
+          address: 0x6060
+          subindex: 0x00
+          value: "1"
+          delay: 0
+          isBinary: false
+          dataType: "U8"
+          action: "write"
+    - operation:
+      name: resetMultiTurn
+      steps:
+        - step:
+          name: "set status word"
+          address: 0x6040
+          subindex: 0x00
+          value: "0x7"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "write"
+        - step:
+          name: "special function setting 9"
+          address: 0x4D01
+          subindex: 0x00
+          value: "0x31"
+          delay: 300000    # 300ms — A6 needs settle time before accepting trigger
+          isBinary: false
+          dataType: "U16"  # 0x4D01:00 is UINT16 in A6 object dictionary — correct
+          action: "write"
+        - step:
+          name: "special start flag 1"
+          address: 0x4D00
+          subindex: 0x1
+          value: "0x200"
+          delay: 300000    # 300ms — wait for trigger to be processed
+          isBinary: false
+          dataType: "U32"  # 0x4D00:01 is UINT32 in A6 object dictionary — was U16 (bug!)
+          action: "write"
+        - step:
+          name: "special start flag 2"
+          address: 0x4D00
+          subindex: 0x1
+          value: "0x0"
+          delay: 0
+          isBinary: false
+          dataType: "U32"  # 0x4D00:01 is UINT32 in A6 object dictionary — was U16 (bug!)
+          action: "write"
+    - operation:
+      name: readinputsignal
+      steps:
+        - step:
+          name: "read input signal"
+          address: 0x4F25
+          subindex: 0x00
+          value: "0xFFFFFFFF"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+          action: "read"
+    - operation:
+      name: jog
+      steps:
+        - step:
+          name: "set rotation status"
+          address: 0x6040
+          subindex: 0x00
+          value: "0x005f"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "write"
+        - step:
+          name: "read rotation status"
+          address: 0x6041
+          subindex: 0x00
+          value: "0xFFFF"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "read"
+    - operation:
+      name: moveToPosition
+      steps:
+        - step:
+          name: "move to position"
+          address: 0x607A
+          subindex: 0x00
+          value: "move_to_pos_val"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+          action: "write"
+    - operation:
+      name: setRPM
+      steps:
+        - step:
+          name: "set profile velocity"
+          address: 0x6081
+          subindex: 0x00
+          value: "rpm_val"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+          action: "write"
+    - operation:
+      name: readError
+      steps:
+        - step:
+          name: "read error from the driver"
+          address: 0x603F
+          subindex: 0x00
+          value: "0xFFFF"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "read"
+    - operation:
+      name: ecs
+      steps:
+        - step:
+          name: "read ECS input"
+          address: 0x4F25
+          subindex: 0x00
+          value: "0000000000000000"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+          action: "read"
+    - operation:
+      name: hard_reset
+      steps:
+        - step:
+          name: "read hard reset input"
+          address: 0x4F25
+          subindex: 0x00
+          value: "0000000000000000"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+          action: "read"
+    - operation:
+      name: finsignal
+      steps:
+        - step:
+          name: "Finish signal 0x02"
+          address: 0x60FE
+          subindex: 0x02
+          value: "65536"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+          action: "write"
+        - step:
+          name: "Finish signal 0x01"
+          address: 0x60FE
+          subindex: 0x01
+          value: "65536"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+          action: "write"          
+    - operation:
+      name: readStatusword
+      steps:
+        - step:
+          name: "read statusword"
+          address: 0x6041
+          subindex: 0x00
+          value: "0xFFFF"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "read"
+    - operation:
+      name: finsignalend
+      steps:
+        - step:
+          name: "Finish signal completed"
+          address: 0x60FE
+          subindex: 0x02
+          value: "0"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+          action: "write"
+        - step:
+          name: "Finish signal completed 0x01"
+          address: 0x60FE
+          subindex: 0x01
+          value: "0"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+          action: "write"          
+    - operation:
+      name: break_on
+      steps:        
+        # - step:
+        #   name: "solenoid off signal 0x02"
+        #   address: 0x60FE
+        #   subindex: 0x02
+        #   value: "0"
+        #   delay: 0
+        #   isBinary: false
+        #   dataType: "U32"
+        #   action: "write"
+        # - step:
+        #   name: "solenoid off signal 0x01"
+        #   address: 0x60FE
+        #   subindex: 0x01
+        #   value: "0"
+        #   delay: 0
+        #   isBinary: false
+        #   dataType: "U32"
+        #   action: "write"           
+    - operation:
+      name: break_off
+      steps:
+        # - step:
+        #   name: "solenoid on signal 0x02"
+        #   address: 0x60FE
+        #   subindex: 0x02
+        #   value: "0000000000000000"
+        #   delay: 0
+        #   isBinary: true
+        #   dataType: "U32"
+        #   action: "write"
+        # - step:
+        #   name: "solenoid on signal 0x01"
+        #   address: 0x60FE
+        #   subindex: 0x01
+        #   value: "0000000000000000"
+        #   delay: 0
+        #   isBinary: true
+        #   dataType: "U32"
+        #   action: "write"
+    - operation:
+      name: emergency
+      steps:
+        # - step:
+        #   name: "Activate emergency"
+        #   address: 0x60FD
+        #   subindex: 0x00
+        #   value: "00100101100000000000000000000100"
+        #   delay: 0
+        #   isBinary: true
+        #   dataType: "U32"
+        #   action: "write"
+    - operation:
+      name: reverse
+      steps:
+        - step:
+          name: "Activate reverse direction"
+          address: 0x607E
+          subindex: 0x00
+          value: "224"
+          delay: 0
+          isBinary: false
+          dataType: "U8"
+          action: "write"
+    - operation:
+      name: nonreverse
+      steps:
+        - step:
+          name: "Activate non reverse direction"
+          address: 0x607E
+          subindex: 0x00
+          value: "0"
+          delay: 0
+          isBinary: false
+          dataType: "U8"
+          action: "write"
+# ============================================================
+# PDO Layout — Phase 2: Dynamic Slave Mapping
+#
+# Panasonic MINAS A6 PDO structure.
+# Previously hardcoded as minas_a6_rx_entries[] / minas_a6_tx_entries[]
+# in ethercatinterface.c.
+#
+# IMPORTANT A6 notes:
+#   - 0x60FE:01 is the EtherCAT ownership MASK (which bits the master owns)
+#     mapped as dig_out_mask — must be pre-asserted to 0xFFFFFFFF at startup
+#   - 0x60FE:02 is the actual output pin VALUES mapped as dig_out_val
+#   - 0x4F25:00 is a vendor-specific input register (not standard 0x60FD)
+#     mapped as digital_in
+#   - 0x4D01/0x4D00 are NOT in this PDO — handled via async SDO requests
+# ============================================================
+# ============================================================
+# motion: — Drive-hardware motion parameters
+#
+# These values are auto-injected into the Device struct at startup
+# by auto-discovery (ParseMotionConfig in auto_discovery.go).
+# They replace rpm-const and drive-x-ratio in device-configuration.yml.
+#
+# rpm_const:    Multiplier that converts JogFeed (from settings.json)
+#               to a raw velocity count sent to 0x60FF.
+#               Formula: targetVelocity = rpm_const × JogFeed
+#               A6 Minas: 20000 counts/rev × 6 = 120000.006
+#
+# drive_x_ratio: Encoder counts per output shaft revolution (after gearbox).
+#                Used to convert degrees → pulse count for PP moves.
+#                A6 Minas with 20-bit encoder: 20000
+# ============================================================
+motion:
+  rpm_const: 720000
+  drive_x_ratio: 120000
+
+pdo:
+  # DC sync: locks SYNC0/SYNC1 events to the EtherCAT master reference clock.
+  # Without this the A6 runs in Free Run mode and faults with Error 80 after
+  # 5-7 seconds as its internal oscillator drifts from the bus reference clock.
+  # 0x0300 = enable SYNC0 (bit8) + SYNC1 (bit9) — standard for PP/PV mode.
+  dc_assign_activate: 0x0300
+  sync_managers:
+    - sm: 2
+      direction: output
+      watchdog: enable
+      pdo_index: 0x1600
+      entries:
+        - index: 0x6040
+          subindex: 0x00
+          bits: 16
+          name: ctrl_word
+        - index: 0x6060
+          subindex: 0x00
+          bits: 8
+          name: op_mode
+        - index: 0x607A
+          subindex: 0x00
+          bits: 32
+          name: target_pos
+        - index: 0x60FF
+          subindex: 0x00
+          bits: 32
+          name: target_vel
+        - index: 0x60FE
+          subindex: 0x01
+          bits: 32
+          name: dig_out_mask
+        - index: 0x60FE
+          subindex: 0x02
+          bits: 32
+          name: dig_out_val
+    - sm: 3
+      direction: input
+      watchdog: disable
+      pdo_index: 0x1A00
+      entries:
+        - index: 0x603F
+          subindex: 0x00
+          bits: 16
+          name: error_code
+        - index: 0x6041
+          subindex: 0x00
+          bits: 16
+          name: status_word
+        - index: 0x6061
+          subindex: 0x00
+          bits: 8
+          name: op_mode_disp
+        - index: 0x6064
+          subindex: 0x00
+          bits: 32
+          name: actual_pos
+        - index: 0x60B9
+          subindex: 0x00
+          bits: 16
+          name: _pad_touch_stat
+        - index: 0x60BA
+          subindex: 0x00
+          bits: 32
+          name: _pad_touch_pos
+        - index: 0x60F4
+          subindex: 0x00
+          bits: 32
+          name: _pad_follow_err
+        - index: 0x4F25
+          subindex: 0x00
+          bits: 32
+          name: digital_in
