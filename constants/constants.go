@@ -1,7 +1,7 @@
 package constants
 
 // SystemVersion version of the system, needs to be updated for each release
-const SystemVersion = "2.0.0.4"
+const SystemVersion = "2.0.0.3"
 
 // ProjectShortID to access releases
 const ProjectShortID = "Vgiv625g6xGVtwAVXaHkBg"
