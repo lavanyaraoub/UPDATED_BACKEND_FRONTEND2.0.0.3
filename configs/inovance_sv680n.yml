@@ -11,9 +11,15 @@
 #  - Supports PP, PV, PT, HM, CSP, CSV, CST (0x6502 = 0x3AD)
 #  - Default RxPDO 0x1701 has NO 0x6060 -> we remap configurable 0x1600 / 0x1A00
 #  - 0x608F, 0x6092, 0x60C2 do NOT exist on this drive (no interpolation-period writes)
-#  - SCALING IS DONE IN THE DRIVE via 0x6091 (see "configure"):
-#        encoder counts = user units x 6091:01 / 6091:02
-#        1 user unit = 0.0001 deg  ->  3,600,000 units per table revolution
+#  - USER UNITS = 0.0001 DEGREE (since 22-Oct-2026, replaces arc-seconds):
+#      0x6091 gear ratio = 65536 / 28125  ->  1 user unit = 0.0001 deg (0.36 arcsec)
+#      1 rev = 3,600,000 units = 8,388,608 encoder counts (23-bit) EXACTLY
+#      1 unit = 2.3302 counts.  1 degree = 10000 units.  0.001 deg = 10 units.
+#    Every position/velocity/accel object (0x607A, 0x6064, 0x60FF, 0x606C,
+#    0x6081, 0x607F, 0x6083, 0x6084, 0x6067) is in these user units.
+#    Int32 position range = +/-596 revolutions (see Bug 1: wrap handling).
+#    !! After changing the gear ratio the stored home (HomingApos) is invalid -> RE-HOME !!
+#  - Standby / hold mode is Profile Position (Mode 1, see InovanceSV680N.StandbyOpMode).
 #  - Digital inputs 0x60FD: bit0 NOT, bit1 POT, bit2 HOME, bit16..20 = DI1..DI5.
 #    Bits 3..15 are NOT USED on SV680N - never decode them.
 #    VERIFY polarity on the bench before enabling StopWhenHWPOTNOT.
@@ -25,18 +31,15 @@ ethercat:
     - operation:
       name: configure
       steps:
-        # --- Drive-side scaling (0x6091 is writable only with servo OFF, PREOP) ---
-        # !!! VERIFY encoder resolution of the DDR before first move !!!
-        #   26-bit (67,108,864 counts/rev): 6091:01 = 524288 , 6091:02 = 28125  (default below)
-        #   23-bit ( 8,388,608 counts/rev): 6091:01 = 65536  , 6091:02 = 28125
-        #   Other:  6091:01 / 6091:02 = counts_per_rev / 3600000 (reduced fraction)
-        # To measure: temporarily set both to 1, rotate exactly one revolution,
-        # counts_per_rev = change of 0x6064.
+        # 0x6091 electronic gear ratio, written every startup so a value left in
+        # the drive by an earlier test can never change the scaling.
+        # encoder counts per user unit = 6091:01 / 6091:02 = 65536 / 28125
+        #   = 8,388,608 counts / 3,600,000 units  (exact, no drift per revolution)
         - step:
           name: "gear ratio motor revolutions"
           address: 0x6091
           subindex: 0x01
-          value: "524288"
+          value: "65536"
           delay: 0
           isBinary: false
           dataType: "U32"
@@ -56,20 +59,37 @@ ethercat:
           delay: 0
           isBinary: false
           dataType: "U8"
-        # Units below are 0.0001 deg/s and 0.0001 deg/s^2.
+        # PP move speed (G01 F is not applied dynamically yet).
+        # 4,291,534 units/s = ~71.5 rpm (same physical speed as before).
         - step:
           name: "profile velocity"
           address: 0x6081
           subindex: 0x00
-          value: "600000"
+          value: "4291534"
           delay: 0
           isBinary: false
           dataType: "U32"
+        # Hard speed cap in the drive: 300 rpm motor max (DDR).
+        # 300 x 3,600,000 / 60 = 18,000,000 units/s. Any jog/feed above this is clamped.
+        - step:
+          name: "max profile velocity (300 rpm)"
+          address: 0x607F
+          subindex: 0x00
+          value: "18000000"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+        # 0x6083 / 0x6084 written explicitly every startup (H0E.01 = 4 saves
+        # SDO writes made before OP to EEPROM, so old values would otherwise stay).
+        # Unit: units/s^2 (0.0001 deg/s^2). Ramp time = speed / accel.
+        #   42,915,344 units/s^2 = ~715 rpm/s (same ramp as before)
+        #   -> ~100 ms to reach the 71.5 rpm profile velocity, ~420 ms from 300 rpm to 0.
+        # Smoother: lower the value. Snappier: raise it.
         - step:
           name: "profile acceleration"
           address: 0x6083
           subindex: 0x00
-          value: "3600000"
+          value: "42915344"
           delay: 0
           isBinary: false
           dataType: "U32"
@@ -77,10 +97,30 @@ ethercat:
           name: "profile deceleration"
           address: 0x6084
           subindex: 0x00
-          value: "3600000"
+          value: "42915344"
           delay: 0
           isBinary: false
           dataType: "U32"
+        # Position window: "target reached" (SW bit10) only when |error| <= 8 units
+        # (0.0008 deg = 2.9 arcsec, ~19 encoder counts) for 0x6068 ms - same
+        # physical size as the previous 3 arcsec. Tighten after gain tuning.
+        # Must stay <= ppHoldInWindowCounts (14) in drive_rotation.go.
+        - step:
+          name: "position window (0.0001 deg)"
+          address: 0x6067
+          subindex: 0x00
+          value: "8"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+        - step:
+          name: "position window time (ms)"
+          address: 0x6068
+          subindex: 0x00
+          value: "10"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
     - operation:
       name: poweron
       steps:
@@ -197,10 +237,11 @@ ethercat:
           action: "read"
     - operation:
       # Fault reset needs a REAL 0->1 edge on bit 7.
-      # Old version wrote 0x8F twice (no edge the second time).
-      # Sequence now: 0x06 (bit7 low) -> 0x86 (bit7 high = edge) -> 0x06 (release).
-      # Note: EE08 (sync loss) cannot clear in PREOP; it clears after OP + DC sync
+      # Sequence: 0x06 (bit7 low) -> 0x86 (bit7 high = edge) -> 0x06 (release).
+      # Note: EE08 (sync loss) cannot clear in PREOP; it clears after OP
       # (jamun does the PDO fault reset after the cyclic task starts).
+      # The old "CSP mode" (0x6060 = 8) step was REMOVED: the SV680N runs free-run
+      # and holds in Profile Position (Mode 1); CSP needs DC sync.
       name: faultReset
       steps:
         - step:
@@ -246,15 +287,6 @@ ethercat:
           isBinary: false
           dataType: "U16"
           action: "read"
-        - step:
-          name: "CSP mode"
-          address: 0x6060
-          subindex: 0x00
-          value: "8"
-          delay: 0
-          isBinary: false
-          dataType: "U8"
-          action: "write"
     - operation:
       # Multi-turn reset NOT enabled for v1 (SupportsMultiTurnReset() = false).
       # Candidate from ESI: 0x200D:0x15 "Absolute Encode Fault Reset" (H0D-20).
@@ -397,29 +429,26 @@ ethercat:
 # ============================================================
 # motion: — Drive-hardware motion parameters
 # See a6minas.yml for field descriptions.
+# Loaded by AUTO-DISCOVER (IdentifyDrive -> profile.Motion) on every boot.
 #
-# DDR motor, 1:1, drive-side scaling via 0x6091 (configure section):
-#   1 user unit = 0.0001 deg, 3,600,000 units per revolution
-#   drive_x_ratio = 3,600,000 / 360 = 10000  (exact, no rounding)
-#   rpm_const     = drive_x_ratio x 4.5 = 45000
-#     (keeps the same deg/s per feed unit as the A6 23-bit/120:1 config:
-#      12,582,912 / 2,796,203 = 4.5)
-#     If feed must mean true table rpm, use 60000 (= 3,600,000 / 60).
-#
-# !!! AUTO-DISCOVER currently injects rpm_const=12582912 / drive_x_ratio=2796203
-# for product 0x000C012A and overrides these values — remove that injection
-# in code, otherwise this section is ignored.
-# !!! Stored HomingApos / work offsets in old units are invalid — re-home.
+# DDR motor, 1:1 (no gearbox), user unit = 0.0001 deg (0x6091 = 65536/28125):
+#   units/rev     = 3,600,000  (= 8,388,608 encoder counts, exact)
+#   drive_x_ratio = units per degree = 3,600,000 / 360 = 10000 (exact)
+#                   0.001 deg step = 10 units exactly (no rounding)
+#   rpm_const     = jog velocity in units/s per feed unit
+#     Motor max 300 rpm = jog feed 3  ->  100 rpm per feed unit
+#     100 x 3,600,000 / 60 = 6,000,000
+#     feed 1 = 100 rpm, feed 2 = 200 rpm, feed 3 = 300 rpm
+#   Drive also caps speed at 300 rpm via 0x607F (configure section).
 # ============================================================
 motion:
-  rpm_const: 45000.0
+  rpm_const: 6000000.0
   drive_x_ratio: 10000
 
 
 pdo:
-  # dc_assign_activate from ESI (SYNC0). ESI also allows free-run (0x0000).
-  # If the drive throws a sync-related alarm at OP, try 0x0000 like Delta.
-  dc_assign_activate: 0x0300
+  # Free-run (0x0000). DC SYNC0 (0x0300) caused EE10.4 PLL faults on this setup.
+  dc_assign_activate: 0x0000
   sync_managers:
     - sm: 2
       direction: output
@@ -474,7 +503,7 @@ pdo:
         - index: 0x6061
           subindex: 0x00
           bits: 8
-          name: op_mode_disp      # was _pad_opmode_disp -> caused "PDO setup failed"
+          name: op_mode_disp
         - index: 0x60FD
           subindex: 0x00
           bits: 32

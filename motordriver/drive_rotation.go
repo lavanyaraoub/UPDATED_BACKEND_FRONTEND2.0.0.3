@@ -7,6 +7,7 @@ import (
 	settings "EtherCAT/settings"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -136,7 +137,167 @@ func ManualJog(masterDevice *MasterDevice, direction int, jogFeedOverride ...flo
 	return nil
 }
 
-// StopJog stop jogging smoothly
+// ppHoldDriver is implemented by drivers that hold position in Profile
+// Position (Mode 1) while idle instead of Profile Velocity (Mode 3, vel=0).
+// Currently only InovanceSV680N. Panasonic A6 and Delta keep their existing
+// StopJog / emergency behaviour unchanged.
+type ppHoldDriver interface {
+	HoldInPPAfterMotion() bool
+}
+
+// usesPPHold reports whether this device's driver opts into PP-hold handling.
+func usesPPHold(masterDevice *MasterDevice) bool {
+	if masterDevice == nil || masterDevice.Driver == nil {
+		return false
+	}
+	h, ok := masterDevice.Driver.(ppHoldDriver)
+	return ok && h.HoldInPPAfterMotion()
+}
+
+const (
+	// ppHoldStandstillSample: position sampling interval while waiting for the
+	// motor to stop after a jog.
+	ppHoldStandstillSample = 5 * time.Millisecond
+	// ppHoldStandstillCounts: |Δposition| per sample treated as stopped.
+	// Units are the drive's USER units (0x6064 after the 0x6091 gear ratio).
+	// SV680N runs in 0.0001 deg units (3,600,000 per rev):
+	// 8 units / 5 ms = 0.16 deg/s ≈ 0.027 rpm.
+	ppHoldStandstillCounts = int32(8)
+	// ppHoldStandstillSamples: consecutive quiet samples required (4 × 5 ms = 20 ms).
+	ppHoldStandstillSamples = 4
+	// ppHoldStandstillTimeout: worst case decel from 300 rpm (41,943,040 counts/s)
+	// at 0x6084 = 100,000,000 counts/s² is ~420 ms. 1.5 s leaves margin for a
+	// lower 0x6084 or a heavier load.
+	ppHoldStandstillTimeout = 1500 * time.Millisecond
+	// ppHoldOpModeTimeout: time allowed for 0x6061 to report the new mode.
+	ppHoldOpModeTimeout = 100 * time.Millisecond
+	// ppHoldRelatchAckTimeout: time allowed for the PP set-point acknowledge (bit12).
+	ppHoldRelatchAckTimeout = 200 * time.Millisecond
+	// ppHoldInWindowCounts: largest |goal-actual| accepted as "already in
+	// position" when bit10 never clears on a PP-hold driver. Must be >= the
+	// drive's 0x6067 position window (same user units). SV680N YAML sets
+	// 0x6067 = 8 units (0.0008 deg), so 14 units (0.0014 deg) is the most we
+	// accept as "already in position" without the drive having to move.
+	ppHoldInWindowCounts = int32(14)
+	// ppHoldStandstillDone: PP-hold drivers (SV680N) only. If the axis is
+	// within ppHoldInWindowCounts of the goal and has not moved more than
+	// ppHoldQuietCounts for this long, the move is declared done even if
+	// bit10 has not settled. Stops 10-15 unit moves hanging 5-11 s while the
+	// rotor creeps the last few units against friction. The drive keeps
+	// holding 607A = goal afterwards, so it still finishes the correction.
+	ppHoldStandstillDone = 300 * time.Millisecond
+	// ppHoldQuietCounts: position change (user units) treated as encoder
+	// noise while checking standstill. 2 units = 0.0002 deg.
+	ppHoldQuietCounts = int32(2)
+)
+
+// ppHoldWaitStandstill blocks until the axis position stops changing or the
+// timeout expires. Uses 0x6064 deltas, so no 0x606C mapping is needed.
+// Returns true when standstill was confirmed.
+func ppHoldWaitStandstill(masterDevice *MasterDevice, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	last := masterDevice.PDOPos.Load()
+	quiet := 0
+	for time.Now().Before(deadline) {
+		if !IsPDOActive() {
+			return false
+		}
+		time.Sleep(ppHoldStandstillSample)
+		now := masterDevice.PDOPos.Load()
+		diff := now - last
+		if diff < 0 {
+			diff = -diff
+		}
+		last = now
+		if diff <= ppHoldStandstillCounts {
+			quiet++
+			if quiet >= ppHoldStandstillSamples {
+				return true
+			}
+		} else {
+			quiet = 0
+		}
+	}
+	return false
+}
+
+// ppHoldWaitOpMode waits until 0x6061 reports the wanted mode.
+// Returns true immediately when 0x6061 is not mapped (nothing to verify).
+func ppHoldWaitOpMode(masterDevice *MasterDevice, want int8, timeout time.Duration) bool {
+	if !masterDevice.PdoOpModeDisplayReady {
+		return true
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if int8(masterDevice.PDOOpModeDisplay.Load()) == want {
+			return true
+		}
+		if !IsPDOActive() {
+			return false
+		}
+		time.Sleep(1 * time.Millisecond)
+	}
+	return int8(masterDevice.PDOOpModeDisplay.Load()) == want
+}
+
+// ppHoldRelatchAtActual latches 607A = current actual position as the Profile
+// Position target (one bit4 set-point handshake in Mode 1), then returns the
+// device to the cyclic standby branch (Mode 1, bit4 LOW).
+//
+// Why: after a jog the drive's last latched PP target is the pre-jog position.
+// Re-latching the actual position guarantees the PP hold is exactly where the
+// jog stopped and that no old target can ever be resumed.
+//
+// The move length is ~0, so this does NOT wait for bit10 — only for the
+// set-point acknowledge — and never calls hasTargetReached (whose Phase 1.5
+// would report "motor did not start" for a zero-length move).
+func ppHoldRelatchAtActual(masterDevice *MasterDevice) error {
+	actual := masterDevice.PDOPos.Load()
+	if err := masterDevice.SetTargetPositionPDO(actual); err != nil {
+		return err
+	}
+	masterDevice.EnablePosPDO(true)
+
+	deadline := time.Now().Add(ppHoldRelatchAckTimeout)
+	for masterDevice.ppSetpointPending.Load() && time.Now().Before(deadline) {
+		if !IsPDOActive() {
+			break
+		}
+		time.Sleep(1 * time.Millisecond)
+	}
+	acked := !masterDevice.ppSetpointPending.Load()
+	masterDevice.EnablePosPDO(false) // back to cyclic standby: Mode 1, bit4 LOW
+
+	if !acked {
+		return fmt.Errorf("[PP-HOLD] re-latch set-point not acknowledged within %v (target=%d)",
+			ppHoldRelatchAckTimeout, actual)
+	}
+	logger.Info("[PP-HOLD] re-latched 607A at actual position drive=", masterDevice.Name,
+		" target=", actual)
+	return nil
+}
+
+// StopJog stops jogging smoothly.
+//
+// Velocity is zeroed on the NEXT cyclic tick (single atomic store); the drive's
+// own 0x6084 profile deceleration brings the motor to rest.
+//
+// PP-hold drivers (usesPPHold, e.g. InovanceSV680N):
+//  1. Wait for real standstill (position deltas) instead of a fixed 250 ms.
+//     At 300 rpm the 0x6084 ramp needs ~420 ms, so 250 ms switched modes while
+//     the motor was still turning.
+//  2. Leave jog → cyclic standby in Mode 1, confirm 0x6061 == 1.
+//  3. Re-latch 607A = actual so the PP hold is exactly where the jog stopped.
+//     If standstill is not reached in time, stay in Mode 3 vel=0
+//     (standbyVelHold) — never switch to PP while the motor is moving.
+//
+// All other drivers (A6, Delta, ...): unchanged — fixed 250 ms then standby.
+//
+// WHY NO SOFTWARE DECEL RAMP:
+//
+//	A stepped ramp at 10 ms intervals produces 100 Hz torque modulation that is
+//	directly audible as a beep throughout decel. The drive's internal decel
+//	ramp is smooth, silent, and hardware-timed.
 func StopJog(masterDevice *MasterDevice) error {
 	logger.Trace("stop jog, driver: ", masterDevice.Name)
 
@@ -145,25 +306,46 @@ func StopJog(masterDevice *MasterDevice) error {
 		return fmt.Errorf("StopJog: PDO not active — jog control is PDO-only in this build")
 	}
 
-	// Zero the velocity in a single atomic store, matching the original SDO build's
-	// procedure: one write to 0x60FF = 0. The drive's 0x6084 profile deceleration
-	// (set at startup in configureDriver) brings it to a smooth stop internally.
-	//
-	// WHY NO SOFTWARE DECEL RAMP:
-	//   Same reason as ManualJog — a stepped ramp at 10ms intervals produces
-	//   100 Hz torque modulation that is directly audible as a beep throughout decel.
-	//   The drive's internal decel ramp is smooth, silent, and hardware-timed.
-	//
-	// 250ms wait: matches the middle build's proven approach. Gives the drive's
-	// own 0x6084 decel ramp time to bring the motor fully to rest before
-	// the cyclic standby branch takes over.
+	// Zero the velocity: the cyclic task writes 0x60FF = 0 on its next 1 ms tick.
 	masterDevice.desiredTargetVelocity.Store(0)
-	time.Sleep(250 * time.Millisecond)
 
-	// Cut jog mode — cyclic standby (Mode 3 vel=0) takes over immediately.
-	// No hardware mode switch: drive stays in Mode 3 throughout.
-	masterDevice.EnableJogPDO(false)
-	logger.Info("[PDO] StopJog: velocity zeroed, standby restored for driver:", masterDevice.Name)
+	if usesPPHold(masterDevice) {
+		stopStart := time.Now()
+		stopped := ppHoldWaitStandstill(masterDevice, ppHoldStandstillTimeout)
+		if !stopped {
+			// Motor still moving (or PDO stopped). Stay in velocity hold —
+			// Mode 3 vel=0 — so the drive keeps decelerating on its ramp.
+			// The next jog / position command clears standbyVelHold.
+			masterDevice.standbyVelHold.Store(true)
+			masterDevice.EnableJogPDO(false)
+			logger.Warn("[PDO] StopJog: standstill not confirmed within ", ppHoldStandstillTimeout,
+				" — holding in Mode 3 vel=0 (no PP re-latch) for driver:", masterDevice.Name,
+				" pos=", masterDevice.PDOPos.Load())
+		} else {
+			// Standstill confirmed: cut jog → cyclic standby writes Mode 1.
+			masterDevice.EnableJogPDO(false)
+			if !ppHoldWaitOpMode(masterDevice, 1, ppHoldOpModeTimeout) {
+				logger.Warn("[PP-HOLD] 0x6061 did not report Mode 1 within ", ppHoldOpModeTimeout,
+					" (active=", masterDevice.PDOOpModeDisplay.Load(), ") drive=", masterDevice.Name)
+			}
+			if err := ppHoldRelatchAtActual(masterDevice); err != nil {
+				// Not fatal: the drive is in Mode 1 standby holding its entry
+				// position. Log it so the bench test can catch it.
+				logger.Warn(err)
+			}
+			logger.Info("[PDO] StopJog: stopped in ", time.Since(stopStart).Round(time.Millisecond),
+				" — PP hold (Mode 1) at pos=", masterDevice.PDOPos.Load(),
+				" activeMode=", masterDevice.PDOOpModeDisplay.Load(),
+				" driver:", masterDevice.Name)
+		}
+	} else {
+		// Legacy path (A6, Delta, Nidec, Veichi): unchanged.
+		// 250 ms gives the drive's own 0x6084 decel ramp time before the
+		// cyclic standby branch takes over.
+		time.Sleep(250 * time.Millisecond)
+		masterDevice.EnableJogPDO(false)
+		logger.Info("[PDO] StopJog: velocity zeroed, standby restored for driver:", masterDevice.Name)
+	}
 
 	notifyDriverStatus("motor_running", "false", masterDevice)
 	envSettings := settings.GetDriverSettings(masterDevice.Name)
@@ -260,6 +442,21 @@ func hasTargetReached(masterDevice *MasterDevice) error {
 		if !bit10Cleared {
 			goal := masterDevice.desiredTargetPosition.Load()
 			actual := masterDevice.PDOPos.Load()
+			residual := int64(goal) - int64(actual)
+			if residual < 0 {
+				residual = -residual
+			}
+			// PP-hold drivers (SV680N) sit in Mode 1 with bit10=1 while idle.
+			// A move shorter than the drive's position window (0x6067) never
+			// clears bit10 because the drive is already "at target". That is
+			// not a missed set-point — the axis is in position. Accept it,
+			// but log the residual so a too-wide 0x6067 stays visible.
+			if usesPPHold(masterDevice) && residual <= int64(ppHoldInWindowCounts) {
+				logger.Warn("[PDO-PP Phase1.5] bit10 stayed HIGH — already inside drive position window. ",
+					"goal=", goal, " actual=", actual, " residual=", residual,
+					" (tighten 0x6067 so the drive corrects this) drive=", masterDevice.Name)
+				return nil
+			}
 			return fmt.Errorf("[PDO-PP Phase1.5] motor did not start — drive may have missed set-point. "+
 				"goal=%d actual=%d diff=%d. Retrying recommended.",
 				goal, actual, goal-actual)
@@ -279,6 +476,11 @@ func hasTargetReached(masterDevice *MasterDevice) error {
 		timeout := time.Now().Add(moveTimeout)
 		var stableFrom time.Time
 		stableStarted := false
+
+		// Fix B: standstill-in-window exit for PP-hold drivers.
+		ppHold := usesPPHold(masterDevice)
+		quietRef := masterDevice.PDOPos.Load()
+		quietFrom := time.Now()
 
 		for {
 			sw := uint16(masterDevice.PDOStatus.Load() & 0xFFFF)
@@ -324,6 +526,34 @@ func hasTargetReached(masterDevice *MasterDevice) error {
 				stableStarted = false // Reset stability timer if it fluctuates
 			}
 
+			// Fix B: if the axis is already inside ppHoldInWindowCounts and has
+			// stopped, do not wait for bit10. The motor can sit 5-8 units short
+			// for several seconds before friction lets it creep into 0x6067.
+			if ppHold {
+				pos := masterDevice.PDOPos.Load()
+				moved := pos - quietRef
+				if moved < 0 {
+					moved = -moved
+				}
+				if moved > ppHoldQuietCounts {
+					quietRef = pos
+					quietFrom = time.Now()
+				} else if time.Since(quietFrom) >= ppHoldStandstillDone {
+					goal := masterDevice.desiredTargetPosition.Load()
+					residual := int64(goal) - int64(pos)
+					if residual < 0 {
+						residual = -residual
+					}
+					if residual <= int64(ppHoldInWindowCounts) {
+						logger.Warn("[PDO-PP STANDSTILL] bit10 not settled, axis stopped inside window — done. ",
+							"goal=", goal, " actual=", pos, " residual=", residual,
+							" quiet=", time.Since(quietFrom).Round(time.Millisecond),
+							" sw=", fmt.Sprintf("0x%04X", sw), " drive=", masterDevice.Name)
+						return nil
+					}
+				}
+			}
+
 			if time.Now().After(timeout) {
 				return fmt.Errorf("[PDO-PP] timeout waiting for Target Reached: sw=0x%04X goal=%d pos=%d",
 					sw, masterDevice.desiredTargetPosition.Load(), masterDevice.PDOPos.Load())
@@ -348,16 +578,62 @@ func freeRotate(masterDevice *MasterDevice, valueinDegree float64) error {
 	return nil
 }
 
-// doRotate function which power on and rotate to a degree, it waits for declamping and clamping.
+// relBaseMaxDrift: largest |607A - actual| (user units) for which a relative
+// move on a PP-hold driver is built from the last commanded target instead
+// of the live position. Normal settled error is <= 22 units (0.0022 deg);
+// 140 units = 0.014 deg. Anything larger
+// means the axis was moved by something else (fault, servo-off, hand) and the
+// live position is the only safe base.
+const relBaseMaxDrift = int64(140)
+
+// doRotate moves the axis by a relative angle.
+//
+// Legacy drivers: goal = live position + delta (unchanged behaviour).
+//
+// PP-hold drivers (SV680N): goal = last commanded target (607A) + delta, and
+// the sub-unit fraction is carried to the next step. Reasons:
+//   - The axis stops a few units short and then creeps past the target.
+//     Building the goal from the live position made each click follow the
+//     creep (99 commanded -> 135 moved in the 22-Oct test).
+//   - Any sub-unit fraction is carried to the next step, so repeated steps
+//     always add up exactly. (With 0.0001 deg units, 0.001 deg = 10 units
+//     and there is no fraction; the carry only matters for odd sizes.)
 func doRotate(masterDevice *MasterDevice, valueinDegree float64) error {
-	delta := getPulsesFromDegree(masterDevice, helper.RoundFloatTo3(valueinDegree))
+	deg := helper.RoundFloatTo3(valueinDegree)
 	actual := int64(masterDevice.PDOPos.Load())
-	goal64 := actual + delta
+
+	var delta, goal64 int64
+	if usesPPHold(masterDevice) {
+		unitsPerDeg := float64(getPulsesFromDegree(masterDevice, 1000)) / 1000.0
+		rem := math.Float64frombits(masterDevice.relRemainder.Load())
+		exact := deg*unitsPerDeg + rem
+		delta = int64(math.Round(exact))
+
+		base := int64(masterDevice.desiredTargetPosition.Load())
+		drift := base - actual
+		if drift < 0 {
+			drift = -drift
+		}
+		if drift > relBaseMaxDrift {
+			logger.Warn("[PDO-PP REL] last target ", base, " is ", drift,
+				" units from actual ", actual, " — using actual as base drive=", masterDevice.Name)
+			base = actual
+			exact = deg * unitsPerDeg
+			delta = int64(math.Round(exact))
+		}
+		masterDevice.relRemainder.Store(math.Float64bits(exact - float64(delta)))
+		goal64 = base + delta
+		logger.Info("[PDO-PP REL] deg=", deg, " exactUnits=", exact, " delta=", delta,
+			" base(607A)=", base, " actual=", actual, " goal=", goal64)
+	} else {
+		delta = getPulsesFromDegree(masterDevice, deg)
+		goal64 = actual + delta
+		logger.Info("[PDO-PP REL] delta=", delta, " actual=", actual, " goal=", goal64)
+	}
+
 	if goal64 < int64(-1<<31) || goal64 > int64(1<<31-1) {
 		return fmt.Errorf("relative target overflow: actual=%d delta=%d goal=%d", actual, delta, goal64)
 	}
-
-	logger.Info("[PDO-PP REL] delta=", delta, " actual=", actual, " goal=", goal64)
 	return runPositionGoal(masterDevice, int32(goal64), "REL")
 }
 
@@ -420,11 +696,17 @@ func runPositionGoal(masterDevice *MasterDevice, goal int32, targetKind string) 
 		" settleTime=", positionSettleTime)
 
 	// Match Mani build: once the drive has reported Target Reached and the
-	// settled position has been logged, disable PP so the cyclic standby branch
-	// takes over on the next PDO tick.
+	// settled position has been logged, disable PP output so the cyclic standby
+	// branch takes over on the next PDO tick.
+	//
+	// For PP-hold drivers (InovanceSV680N, and the A6) standby is Mode 1 with
+	// bit4 LOW: the drive keeps holding THIS goal with its position loop. No
+	// mode change happens here. For Mode-3 standby drivers (Delta) the drive
+	// switches to velocity hold as before.
 	masterDevice.EnablePosPDO(false)
 	logger.Info("[POST-REACH] phase=PP_DISABLED drive=", masterDevice.Name,
-		" goal=", goal, " actual=", masterDevice.PDOPos.Load())
+		" goal=", goal, " actual=", masterDevice.PDOPos.Load(),
+		" standbyMode=", masterDevice.standbyOpMode())
 
 	notifyDriverStatus("motor_running", "false", masterDevice)
 

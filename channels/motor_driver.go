@@ -1,5 +1,7 @@
 package channels
 
+import "time"
+
 /*
 Channel and its type used by motorodriver/motor_action_listener.go to perform any motor driver actions
 like Reset, Jog etc
@@ -81,13 +83,89 @@ func DriveActionChannelReady() {
 	isReady = true
 }
 
+// DriverActionSendTimeout is the longest any caller waits to queue a
+// DriverAction. The channel has 100 slots, so a full channel means the
+// listener is stuck or stopped — waiting longer would only spread the hang.
+const DriverActionSendTimeout = 2 * time.Second
+
+// SendDriverActionTimeout queues a DriverAction without ever blocking forever.
+//
+// HANG FIX (all drives): a plain `DriverActionChannel <- a` blocks FOREVER when
+//   - the channel is still nil (before initDriverActionListener() in InitMaster),
+//     because a send on a nil channel never completes, or
+//   - the listener is stuck and the 100-slot buffer is full.
+// This happened at boot whenever ANY alarm was raised during InitMaster
+// (SDO failure, startup drive fault): sendAlarm → stop_prog_exec → the
+// command-exec listener tried to forward STOP_PROGRAM_EXECUTION into the
+// still-nil DriverActionChannel and blocked for the rest of the process life.
+//
+// Returns false when the action could not be queued (channel nil / not ready /
+// timeout). The caller decides whether to log; this package has no logger.
+func SendDriverActionTimeout(a DriverAction, timeout time.Duration) bool {
+	ch := DriverActionChannel // snapshot: Reset replaces the channel
+	if ch == nil || !isReady {
+		return false
+	}
+	if timeout <= 0 {
+		select {
+		case ch <- a:
+			return true
+		default:
+			return false
+		}
+	}
+	t := time.NewTimer(timeout)
+	defer t.Stop()
+	select {
+	case ch <- a:
+		return true
+	case <-t.C:
+		return false
+	}
+}
+
+// SendDriverAction queues a DriverAction with the default timeout.
+func SendDriverAction(a DriverAction) bool {
+	return SendDriverActionTimeout(a, DriverActionSendTimeout)
+}
+
 //NotifyMotorDriver modules can call this function to notify action to motor driver
 func NotifyMotorDriver(action ActionType, value string, driveName string, direction int) {
 	if !isReady {
 		return
 	}
 	driverAction := DriverAction{Action: action, DriveName: driveName, Value: value, Direction: direction}
-	DriverActionChannel <- driverAction
+	// Never block forever (nil channel during boot, or a stuck listener).
+	_ = SendDriverAction(driverAction)
+}
+
+// TryWriteCommandExecInput queues a command-exec input without blocking
+// longer than timeout. Used on paths that must never stall (emergency):
+// if the command-exec listener is stuck, the 10-slot buffer fills and the
+// blocking WriteCommandExecInput would freeze the caller.
+// Returns false if the input could not be queued.
+func TryWriteCommandExecInput(inputType, data string, timeout time.Duration) bool {
+	ch := CommandExecInputChannel
+	if ch == nil {
+		return false
+	}
+	msg := CommandExecInput{InputType: inputType, Data: data}
+	if timeout <= 0 {
+		select {
+		case ch <- msg:
+			return true
+		default:
+			return false
+		}
+	}
+	t := time.NewTimer(timeout)
+	defer t.Stop()
+	select {
+	case ch <- msg:
+		return true
+	case <-t.C:
+		return false
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -268,7 +268,9 @@ func socketEventsCreator(server *gosocketio.Server) {
 				// ================= END FEATURE 2 =============
 			}
 
-			channels.DriverActionChannel <- driverAction
+			if !channels.SendDriverAction(driverAction) {
+				logger.Error("[SOCKET] jog action dropped — driver action listener not running:", driverAction.Action)
+			}
 
 		} else {
 
@@ -284,7 +286,9 @@ func socketEventsCreator(server *gosocketio.Server) {
 				DriveName: msg.DriveName,
 			}
 
-			channels.DriverActionChannel <- driverAction
+			if !channels.SendDriverAction(driverAction) {
+				logger.Error("[SOCKET] jog action dropped — driver action listener not running:", driverAction.Action)
+			}
 		}
 	})
 

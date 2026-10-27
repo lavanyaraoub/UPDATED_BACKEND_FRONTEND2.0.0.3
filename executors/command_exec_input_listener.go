@@ -4,6 +4,7 @@ import (
 	channels "EtherCAT/channels"
 	dt "EtherCAT/datatypes"
 	logger "EtherCAT/logger"
+	"time"
 )
 
 /*
@@ -49,8 +50,20 @@ func listenCommandExecInput(execContext *dt.ExecutionContext) {
 				execContextToModify.StopExecution = true
 				dt.ExecController.Cancel()
 				channels.NotifyCmdComplete()
+				// HANG FIX (all drives): this goroutine is the ONLY consumer of
+				// CommandExecInputChannel. It must never block. The old
+				// `channels.DriverActionChannel <- driverAction` blocked forever
+				// when a stop arrived during boot (DriverActionChannel still nil
+				// until InitMaster starts the action listener). From then on
+				// every Stop, mode change and waiting_for_ecs was lost, the
+				// 10-slot buffer filled, and the next move / Emergency / Reset
+				// froze on WriteCommandExecInput.
+				// Before the action listener exists there is nothing to stop, so
+				// dropping the forward is correct. 200 ms covers a busy listener.
 				driverAction := channels.DriverAction{Action: "STOP_PROGRAM_EXECUTION"}
-				channels.DriverActionChannel <- driverAction
+				if !channels.SendDriverActionTimeout(driverAction, 200*time.Millisecond) {
+					logger.Warn("[EXEC-INPUT] STOP_PROGRAM_EXECUTION not forwarded — driver action listener not running or busy (stop flag still applied)")
+				}
 
 			case "reset":
 				logger.Trace("reset received — writing line 0 to disk before Reset()")

@@ -284,22 +284,28 @@ func startGPIOHandler() {
 			case 17:
 				if state == 1 {
 					logger.Info("[GPIO] Start Jog")
-					channels.DriverActionChannel <- channels.DriverAction{
+					if !channels.SendDriverAction(channels.DriverAction{
 						Action:    "MANUAL_JOG",
 						Direction: 1,
+					}) {
+						logger.Error("[GPIO] driver action dropped — listener not running")
 					}
 				} else {
 					logger.Info("[GPIO] Stop Jog")
-					channels.DriverActionChannel <- channels.DriverAction{
+					if !channels.SendDriverAction(channels.DriverAction{
 						Action: "STOP_JOG",
+					}) {
+						logger.Error("[GPIO] driver action dropped — listener not running")
 					}
 				}
 
 			case 22:
 				if state == 1 {
 					logger.Info("[GPIO] Zero reference triggered by hardware")
-					channels.DriverActionChannel <- channels.DriverAction{
+					if !channels.SendDriverAction(channels.DriverAction{
 						Action: "ZERO_REF",
+					}) {
+						logger.Error("[GPIO] driver action dropped — listener not running")
 					}
 				}
 

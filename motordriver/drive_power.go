@@ -242,6 +242,18 @@ func emergency(masterDevice *MasterDevice) error {
 	if IsPDOActive() {
 		for _, d := range masterDevices {
 			if d.Name == masterDevice.Name {
+				// PP-hold drivers (InovanceSV680N): standby is normally Mode 1.
+				// After an emergency the drive must decelerate in Mode 3 vel=0,
+				// not be captured by Profile Position (which would finish a
+				// latched PP target, or snap back after a jog). Set the
+				// velocity hold BEFORE disabling jog/pos output so the very
+				// first standby tick already writes Mode 3. The next jog or
+				// position command clears it (EnableJogPDO/EnablePosPDO). When the
+				// axis is already idle (holding in PP) nothing is changed.
+				if usesPPHold(d) && (d.IsJogEnabled() || d.IsPosEnabled()) {
+					d.standbyVelHold.Store(true)
+					logger.Warn("[PDO] emergency: PP-hold driver — standby forced to Mode 3 vel=0 until next motion command:", masterDevice.Name)
+				}
 				if d.IsJogEnabled() {
 					// Fast ramp-down: steps velocity to 0 smoothly, then
 					// locks the rest position before cutting jog mode.
@@ -268,6 +280,8 @@ func emergency(masterDevice *MasterDevice) error {
 					//      The drive decelerates cleanly using its 0x6084 profile ramp.
 					//      No new set-point pulse, no bit12 interference.
 					//   2. EnablePosPDO(false) → cyclic standby takes over in Mode 3 vel=0.
+					//      (PP-hold drivers: guaranteed by standbyVelHold set above;
+					//      A6 standby stays Mode 1 — unchanged legacy behaviour.)
 					//      No hardware mode switch occurs: drive was already in Mode 3
 					//      from step 1, so there is no correction-torque jerk.
 					//   3. Signal hasTargetReached via posMoveAborted to exit immediately.

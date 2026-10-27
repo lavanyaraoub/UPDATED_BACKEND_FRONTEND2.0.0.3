@@ -132,10 +132,22 @@ type MasterDevice struct {
 	desiredTargetPosition atomic.Int32
 	currentTargetPosition atomic.Int32
 	ppSetpointPending     atomic.Bool // one-shot pulse for Profile Position new set-point (bit4)
+	// relRemainder: float64 bits of the sub-unit fraction left over by the last
+	// relative move (PP-hold drivers). Carried into the next doRotate so repeated
+	// small steps add up exactly (no lost fraction per click).
+	relRemainder atomic.Uint64
 	// posMoveAborted: set to true by emergency() when it cancels an in-flight PP move.
 	// hasTargetReached polls this flag and exits immediately instead of waiting for the
 	// 30-second timeout. Cleared by hasTargetReached on exit.
 	posMoveAborted atomic.Bool
+	// standbyVelHold: when true, the cyclic standby branch uses Mode 3 (PV,
+	// vel=0) instead of the driver's StandbyOpMode(). Only used by drivers that
+	// hold in Profile Position while idle (see usesPPHold). Set by emergency()
+	// and by StopJog when the motor did not reach standstill in time, so the
+	// drive decelerates on its 0x6084 ramp instead of finishing a latched PP
+	// target. Cleared automatically by the next EnableJogPDO(true) /
+	// EnablePosPDO(true), i.e. by the next deliberate motion command.
+	standbyVelHold atomic.Bool
 
 	Position int
 	Name     string
@@ -344,6 +356,7 @@ func (d *MasterDevice) EnableJogPDO(enabled bool) {
 	d.pdoJogEnabled.Store(enabled)
 	if enabled {
 		d.pdoPosEnabled.Store(false)
+		d.standbyVelHold.Store(false) // new deliberate motion ends any velocity hold
 	}
 }
 
@@ -376,9 +389,28 @@ func (d *MasterDevice) EnablePosPDO(enabled bool) {
 	d.pdoPosEnabled.Store(enabled)
 	if enabled {
 		d.pdoJogEnabled.Store(false)
+		d.standbyVelHold.Store(false) // new deliberate motion ends any velocity hold
 		// arm one-shot set-point pulse for Profile Position mode (opmode 1)
 		d.ppSetpointPending.Store(true)
 	}
+}
+
+// standbyOpMode returns the 0x6060 value the cyclic standby branch writes
+// when neither jog nor position output is enabled.
+//
+// Normally this is the driver's StandbyOpMode(). For PP-hold drivers
+// (usesPPHold) it is overridden to Mode 3 while standbyVelHold is set, so an
+// emergency-aborted PP move or a not-yet-stopped jog decelerates on the
+// drive's velocity ramp instead of being captured by Profile Position.
+// Called every 1 ms from the cyclic task — must stay allocation-free.
+func (d *MasterDevice) standbyOpMode() int8 {
+	if d.standbyVelHold.Load() {
+		return 3
+	}
+	if d.Driver == nil {
+		return 3
+	}
+	return d.Driver.StandbyOpMode()
 }
 
 // SetTargetPositionPDO sets the goal position for the cyclic position ramp.

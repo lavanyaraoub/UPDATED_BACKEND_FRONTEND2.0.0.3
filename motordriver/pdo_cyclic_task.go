@@ -731,12 +731,16 @@ func StartPDOCyclic(devices []*MasterDevice) error {
 							} else {
 								C.write_u16(d.DomainPD, d.OffControlWord, C.uint16_t(0x000F))
 							}
-							// HAL: StandbyOpMode is drive-specific.
-							//   A6Minas / DeltaASDA2E → Mode 3 (Profile Velocity, vel=0):
-							//     silent standby via velocity loop, no jerk, no beeping.
-							//   NidecM700 → Mode 8 (CSP): Mode 3 vel=0 causes 0xFF01 drive
-							//     trips on Nidec; CSP with position hold is required.
-							C.write_s8(d.DomainPD, d.OffOpMode, C.int8_t(d.Driver.StandbyOpMode()))
+							// HAL: standby op-mode is drive-specific (d.standbyOpMode()).
+							//   A6Minas      → Mode 1 (PP hold of the last latched target).
+							//   DeltaASDA2E  → Mode 3 (Profile Velocity, vel=0).
+							//   InovanceSV680N → Mode 1 (PP hold) — position loop stays
+							//     closed while idle, so the axis cannot creep.
+							//   NidecM700    → Mode 8 (CSP).
+							// d.standbyOpMode() returns Mode 3 instead while the device is
+							// in a post-emergency / not-yet-stopped velocity hold
+							// (standbyVelHold), so an aborted PP move still decelerates.
+							C.write_s8(d.DomainPD, d.OffOpMode, C.int8_t(d.standbyOpMode()))
 							actual := d.PDOPos.Load()
 							C.write_s32(d.DomainPD, d.OffTargetPos, C.int32_t(actual))
 							C.write_s32(d.DomainPD, d.OffTargetVel, C.int32_t(0))
@@ -794,8 +798,8 @@ func StartPDOCyclic(devices []*MasterDevice) error {
 
 						} else {
 							// Standby — drive not yet in Operation Enabled.
-							// Use per-device StandbyOpMode for the same reason as above.
-							C.write_s8(d.DomainPD, d.OffOpMode, C.int8_t(d.Driver.StandbyOpMode()))
+							// Use per-device standby op-mode for the same reason as above.
+							C.write_s8(d.DomainPD, d.OffOpMode, C.int8_t(d.standbyOpMode()))
 							C.write_s32(d.DomainPD, d.OffTargetVel, C.int32_t(0))
 							actual := d.PDOPos.Load()
 							C.write_s32(d.DomainPD, d.OffTargetPos, C.int32_t(actual))

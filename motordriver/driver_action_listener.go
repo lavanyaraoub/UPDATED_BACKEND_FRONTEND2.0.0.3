@@ -162,12 +162,20 @@ func listenDriverAction() {
 			if device == nil {
 				continue
 			}
-			// Emergency is destructive to the active program. A single reset event
-			// aborts the execution generation and clears all persisted resume state.
-			channels.WriteCommandExecInput("reset", "")
+			// SAFETY: stop the motor FIRST. Nothing in front of emergency() may
+			// block. Previously WriteCommandExecInput("reset") ran first; when
+			// the command-exec listener was stuck its 10-slot buffer was full,
+			// that write blocked, and the motor was never stopped (22-Oct
+			// 11:44:00 / 11:44:17 — "emergency activated" with no action).
 			stopECSCheck()
 			emergency(device)
 			PowerOffAll(getMasterDevices())
+			// Emergency is destructive to the active program. A single reset event
+			// aborts the execution generation and clears all persisted resume state.
+			// Bounded write: never let a stuck executor freeze this listener.
+			if !channels.TryWriteCommandExecInput("reset", "", 500*time.Millisecond) {
+				logger.Error("[EMERGENCY] motor stopped, but program reset could not be queued — command-exec listener not responding")
+			}
 			statusnotifier.SocketMessage("emergency_done", "emergency completed")
 			statusnotifier.Alarm("Software Emergency pressed")
 
