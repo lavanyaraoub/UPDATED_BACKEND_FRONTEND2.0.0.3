@@ -11,7 +11,7 @@
 
 # Ethercat instruction for
 # Panasonic Minias A6 BF-series drives
-# Product code: 0x613c0008  (F/BF model — 17-bit encoder, 1:90 gearbox)
+# Product code: 0x613c0008  (F/BF model â€” 17-bit encoder, 1:90 gearbox)
 # Vendor ID:    0x0000066F  (Panasonic)
 
 ethercat:
@@ -38,7 +38,7 @@ ethercat:
           name: "profile velocity"
           address: 0x6081
           subindex: 0x00
-          value: "1000000"
+          value: "1200000"
           delay: 0
           isBinary: false
           dataType: "U32"
@@ -46,7 +46,7 @@ ethercat:
           name: "profile acceleration"
           address: 0x6083
           subindex: 0x00
-          value: "10000000"
+          value: "5000000"
           delay: 0
           isBinary: false
           dataType: "U32"
@@ -54,7 +54,7 @@ ethercat:
           name: "profile deceleration"
           address: 0x6084
           subindex: 0x00
-          value: "10000000"
+          value: "5000000"
           delay: 0
           isBinary: false
           dataType: "U32"
@@ -289,18 +289,18 @@ ethercat:
           address: 0x4D01
           subindex: 0x00
           value: "0x31"
-          delay: 300000    # 300ms — A6 needs settle time before accepting trigger
+          delay: 300000    # 300ms â€” A6 needs settle time before accepting trigger
           isBinary: false
-          dataType: "U16"  # 0x4D01:00 is UINT16 in A6 object dictionary — correct
+          dataType: "U16"  # 0x4D01:00 is UINT16 in A6 object dictionary â€” correct
           action: "write"
         - step:
           name: "special start flag 1"
           address: 0x4D00
           subindex: 0x1
           value: "0x200"
-          delay: 300000    # 300ms — wait for trigger to be processed
+          delay: 300000    # 300ms â€” wait for trigger to be processed
           isBinary: false
-          dataType: "U32"  # 0x4D00:01 is UINT32 in A6 object dictionary — was U16 (bug!)
+          dataType: "U32"  # 0x4D00:01 is UINT32 in A6 object dictionary â€” was U16 (bug!)
           action: "write"
         - step:
           name: "special start flag 2"
@@ -309,7 +309,7 @@ ethercat:
           value: "0x0"
           delay: 0
           isBinary: false
-          dataType: "U32"  # 0x4D00:01 is UINT32 in A6 object dictionary — was U16 (bug!)
+          dataType: "U32"  # 0x4D00:01 is UINT32 in A6 object dictionary â€” was U16 (bug!)
           action: "write"
     - operation:
       name: readinputsignal
@@ -537,7 +537,7 @@ ethercat:
           dataType: "U8"
           action: "write"
 # ============================================================
-# PDO Layout — Phase 2: Dynamic Slave Mapping
+# PDO Layout â€” Phase 2: Dynamic Slave Mapping
 #
 # Panasonic MINAS A6 PDO structure.
 # Previously hardcoded as minas_a6_rx_entries[] / minas_a6_tx_entries[]
@@ -545,14 +545,14 @@ ethercat:
 #
 # IMPORTANT A6 notes:
 #   - 0x60FE:01 is the EtherCAT ownership MASK (which bits the master owns)
-#     mapped as dig_out_mask — must be pre-asserted to 0xFFFFFFFF at startup
+#     mapped as dig_out_mask â€” must be pre-asserted to 0xFFFFFFFF at startup
 #   - 0x60FE:02 is the actual output pin VALUES mapped as dig_out_val
 #   - 0x4F25:00 is a vendor-specific input register (not standard 0x60FD)
 #     mapped as digital_in
-#   - 0x4D01/0x4D00 are NOT in this PDO — handled via async SDO requests
+#   - 0x4D01/0x4D00 are NOT in this PDO â€” handled via async SDO requests
 # ============================================================
 # ============================================================
-# motion: — Drive-hardware motion parameters
+# motion: â€” Drive-hardware motion parameters
 #
 # These values are auto-injected into the Device struct at startup
 # by auto-discovery (ParseMotionConfig in auto_discovery.go).
@@ -560,22 +560,22 @@ ethercat:
 #
 # rpm_const:    Multiplier that converts JogFeed (from settings.json)
 #               to a raw velocity count sent to 0x60FF.
-#               Formula: targetVelocity = rpm_const × JogFeed
-#               A6 Minas: 20000 counts/rev × 6 = 120000.006
+#               Formula: targetVelocity = rpm_const Ã— JogFeed
+#               A6 Minas: 20000 counts/rev Ã— 6 = 120000.006
 #
 # drive_x_ratio: Encoder counts per output shaft revolution (after gearbox).
-#                Used to convert degrees → pulse count for PP moves.
+#                Used to convert degrees â†’ pulse count for PP moves.
 #                A6 Minas with 20-bit encoder: 20000
 # ============================================================
 motion:
-  rpm_const: 90000.0048   # 17-bit encoder, gear ratio 1:90 (1333.3334 * 90)
-  drive_x_ratio: 20000 # 17-bit encoder, gear ratio 1:90
+  rpm_const: 54000    # 17-bit encoder, gear ratio 1:90 (1333.3334 * 90)
+  drive_x_ratio: 30000 # 17-bit encoder, gear ratio 1:90
 
 pdo:
   # DC sync: locks SYNC0/SYNC1 events to the EtherCAT master reference clock.
   # Without this the A6 runs in Free Run mode and faults with Error 80 after
   # 5-7 seconds as its internal oscillator drifts from the bus reference clock.
-  # 0x0300 = enable SYNC0 (bit8) + SYNC1 (bit9) — standard for PP/PV mode.
+  # 0x0300 = enable SYNC0 (bit8) + SYNC1 (bit9) â€” standard for PP/PV mode.
   dc_assign_activate: 0x0300
   sync_managers:
     - sm: 2
@@ -623,7 +623,7 @@ pdo:
         - index: 0x6061
           subindex: 0x00
           bits: 8
-          name: op_mode_display
+          name: _pad_opmode_disp
         - index: 0x6064
           subindex: 0x00
           bits: 32

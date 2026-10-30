@@ -151,6 +151,7 @@ package: all
 	mkdir -p "$(dir_path)/configs"
 	cp ./configs/M700.yml "$(dir_path)/configs/"
 	cp ./configs/a6minas.yml "$(dir_path)/configs/"
+	cp ./configs/a6minas_bf.yml "$(dir_path)/configs/"
 	cp ./configs/device-configuration.yml "$(dir_path)/configs/"
 	cp ./configs/error_definition.txt "$(dir_path)/configs/"
 	cp ./configs/execution.yml "$(dir_path)/configs/"
