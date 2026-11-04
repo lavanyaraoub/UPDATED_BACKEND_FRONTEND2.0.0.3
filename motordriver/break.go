@@ -23,6 +23,12 @@ func breakOn(masterDevice *MasterDevice) error {
 	if masterDevice == nil {
 		return fmt.Errorf("breakOn: nil device")
 	}
+
+	// SD710: SOL OFF means CLAMP.
+	if handled, err := trySD710BreakCommand(masterDevice, false); handled {
+		return err
+	}
+
 	logger.Info("[BRAKE-SEQ] phase=CLAMP_CMD drive=", masterDevice.Name,
 		" bit=0x00000002 action=SET")
 
@@ -56,6 +62,12 @@ func breakOff(masterDevice *MasterDevice) error {
 	if masterDevice == nil {
 		return fmt.Errorf("breakOff: nil device")
 	}
+
+	// SD710: SOL ON means DECLAMP.
+	if handled, err := trySD710BreakCommand(masterDevice, true); handled {
+		return err
+	}
+	
 	logger.Info("[BRAKE-SEQ] phase=DECLAMP_CMD drive=", masterDevice.Name,
 		" bit=0x00000002 action=CLEAR")
 

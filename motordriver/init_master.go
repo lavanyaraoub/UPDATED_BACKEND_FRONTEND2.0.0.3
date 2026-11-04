@@ -199,7 +199,7 @@ func InitMaster() error {
 				logger.Info(fmt.Sprintf("[AUTO-DISCOVER] Axis %s (pos %d): Found hardware Vendor=0x%08X Product=0x%08X", dev.Name, dev.ID, found.VendorID, found.ProductCode))
 
 				// Look up the profile based on the physical hardware
-				profile, err := IdentifyDrive(found.VendorID, found.ProductCode)
+				profile, err := IdentifyDrive(found.VendorID, found.ProductCode,  found.Name)
 				if err != nil {
 					return fmt.Errorf("InitMaster: Auto-Discovery failed for Axis %s: %v", dev.Name, err)
 				}

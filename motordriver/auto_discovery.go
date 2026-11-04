@@ -88,7 +88,7 @@ type AutoDiscoveryProfile struct {
 //  2. Create configs/newdrive.yml with ethercat:, pdo:, and motion: sections.
 //  3. Add the Go driver file and register in motor_driver_factory.go.
 //     No other files need changing.
-func IdentifyDrive(vendorID, productCode uint32) (AutoDiscoveryProfile, error) {
+func IdentifyDrive(vendorID, productCode uint32, _ ...string) (AutoDiscoveryProfile, error) {
 	var profile AutoDiscoveryProfile
 
 	switch {
@@ -133,12 +133,12 @@ func IdentifyDrive(vendorID, productCode uint32) (AutoDiscoveryProfile, error) {
 			AddressConfigFile: "/configs/M700.yml",
 		}
 
-	// ── 4. Veichi SD700 ──────────────────────────────────────────────────
+	// ── 4. Veichi SD710 ──────────────────────────────────────────────────
 	case vendorID == 0x00850104 && productCode == 0x01030507:
 		profile = AutoDiscoveryProfile{
-			DriveType:         "veichi_sd700",
-			AddressConfigName: "veichi_sd700",
-			AddressConfigFile: "/configs/veichi_sd700.yml",
+			DriveType:         "sd710",
+			AddressConfigName: "sd710",
+			AddressConfigFile: "/configs/sd710.yml",
 		}
 
 	// ── 5. Future drives: add new case blocks here ────────────────────────

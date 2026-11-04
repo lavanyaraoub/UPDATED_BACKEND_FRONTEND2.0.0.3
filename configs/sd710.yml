@@ -1,0 +1,478 @@
+---
+# VEICHI SD710 EtherCAT(CoE) Servo Drive Rev21
+# Final one-terminal / one-function I/O revision.
+#
+# LIVE-VERIFIED X INPUT PDO MAP (VCSDSoft Un443 / 0x60FD):
+#   X1 = 0x00000001 -> ECS
+#   X2 = 0x00000002 -> POT
+#   X3 = 0x00000004 -> NOT
+#   X4 = 0x00000008 -> CL
+#   X5 = 0x00000010 -> DCL
+#
+# OUTPUT ASSIGNMENT:
+#   Y1 = Software SOL/brake output (Pn611=0x1007 -> Pn631.bit0) -> UI SOL O/P
+#   Y2 = Finish output (Pn612=0x1002 -> Pn631.bit1) -> UI FIN pulse
+#   Y3 = Servo Ready (Pn613=0x0001) -> UI ALM-OUT indicator
+#
+# Runtime X monitoring uses 0x60FD PDO only. No Un100 SDO polling.
+# Clamp truth table: SOL=0 -> CL=1,DCL=0; SOL=1 -> CL=0,DCL=1.
+# CL=1,DCL=1 is invalid; CL=0,DCL=0 is transition/unknown.
+# Runtime UI monitoring does not poll Un101.
+# 0x60FE is NOT used by SD710 application logic.
+# Its existing padding entry is retained only to preserve the proven 6-Rx/8-Tx PDO shape.
+# HOME logic remains removed. Motion scaling/motion logic remain unchanged.
+
+ethercat:
+    - operation:
+      name: configure
+      steps:
+        - step:
+          name: "Pn601 X1 raw ECS input"
+          address: 0x2006
+          subindex: 0x02
+          value: "0x0000"
+          delay: 50000
+          isBinary: false
+          dataType: "U16"
+          action: "write"
+
+        - step:
+          name: "Pn602 X2 positive overtravel"
+          address: 0x2006
+          subindex: 0x03
+          value: "0x0002"
+          delay: 50000
+          isBinary: false
+          dataType: "U16"
+          action: "write"
+
+        - step:
+          name: "Pn603 X3 negative overtravel"
+          address: 0x2006
+          subindex: 0x04
+          value: "0x0003"
+          delay: 50000
+          isBinary: false
+          dataType: "U16"
+          action: "write"
+
+        - step:
+          name: "Pn604 X4 raw CL feedback"
+          address: 0x2006
+          subindex: 0x05
+          value: "0x0000"
+          delay: 50000
+          isBinary: false
+          dataType: "U16"
+          action: "write"
+
+        - step:
+          name: "Pn605 X5 raw DCL feedback"
+          address: 0x2006
+          subindex: 0x06
+          value: "0x0000"
+          delay: 50000
+          isBinary: false
+          dataType: "U16"
+          action: "write"
+
+        - step:
+          name: "Pn611 Y1 software SOL/brake via Pn631 bit0"
+          address: 0x2006
+          subindex: 0x12
+          value: "0x1007"
+          delay: 50000
+          isBinary: false
+          dataType: "U16"
+          action: "write"
+
+        - step:
+          name: "Pn612 Y2 software FIN via Pn631 bit1"
+          address: 0x2006
+          subindex: 0x13
+          value: "0x1002"
+          delay: 50000
+          isBinary: false
+          dataType: "U16"
+          action: "write"
+
+        - step:
+          name: "Pn613 Y3 native Servo Ready"
+          address: 0x2006
+          subindex: 0x14
+          value: "0x0001"
+          delay: 50000
+          isBinary: false
+          dataType: "U16"
+          action: "write"
+
+        - step:
+          name: "Pn631 software Y outputs initial OFF"
+          address: 0x2006
+          subindex: 0x32
+          value: "0"
+          delay: 50000
+          isBinary: false
+          dataType: "U16"
+          action: "write"
+
+    - operation:
+      name: poweron
+      steps:
+        - step:
+          name: "shutdown"
+          address: 0x6040
+          subindex: 0x00
+          value: "0x0006"
+          delay: 100000
+          isBinary: false
+          dataType: "U16"
+          action: "write"
+        - step:
+          name: "switch on"
+          address: 0x6040
+          subindex: 0x00
+          value: "0x0007"
+          delay: 100000
+          isBinary: false
+          dataType: "U16"
+          action: "write"
+
+    - operation:
+      name: fastPowerOn
+      steps:
+        - step:
+          name: "operation enabled"
+          address: 0x6040
+          subindex: 0x00
+          value: "0x000F"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "write"
+
+    - operation:
+      name: fastPowerOff
+      steps:
+        - step:
+          name: "shutdown"
+          address: 0x6040
+          subindex: 0x00
+          value: "0x0006"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "write"
+
+    - operation:
+      name: poweroff
+      steps:
+        - step:
+          name: "shutdown"
+          address: 0x6040
+          subindex: 0x00
+          value: "0x0006"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "write"
+
+    - operation:
+      name: manualjog
+      steps:
+        - step:
+          name: "target velocity"
+          address: 0x60FF
+          subindex: 0x00
+          value: "jog_rpm_placeholder"
+          delay: 0
+          isBinary: false
+          dataType: "I32"
+          action: "write"
+        - step:
+          name: "Profile Velocity mode"
+          address: 0x6060
+          subindex: 0x00
+          value: "3"
+          delay: 0
+          isBinary: false
+          dataType: "I8"
+          action: "write"
+
+    - operation:
+      name: stopjog
+      steps:
+        - step:
+          name: "zero target velocity"
+          address: 0x60FF
+          subindex: 0x00
+          value: "0"
+          delay: 0
+          isBinary: false
+          dataType: "I32"
+          action: "write"
+        - step:
+          name: "restore Profile Position standby"
+          address: 0x6060
+          subindex: 0x00
+          value: "1"
+          delay: 100000
+          isBinary: false
+          dataType: "I8"
+          action: "write"
+
+    - operation:
+      name: cleanupJog
+      steps:
+        - step:
+          name: "zero target velocity"
+          address: 0x60FF
+          subindex: 0x00
+          value: "0"
+          delay: 50000
+          isBinary: false
+          dataType: "I32"
+          action: "write"
+        - step:
+          name: "clear PP setpoint edge"
+          address: 0x6040
+          subindex: 0x00
+          value: "0x000F"
+          delay: 50000
+          isBinary: false
+          dataType: "U16"
+          action: "write"
+        - step:
+          name: "restore Profile Position standby"
+          address: 0x6060
+          subindex: 0x00
+          value: "1"
+          delay: 200000
+          isBinary: false
+          dataType: "I8"
+          action: "write"
+
+    - operation:
+      name: pollstatus
+      steps:
+        - step:
+          name: "actual position"
+          address: 0x6064
+          subindex: 0x00
+          value: "0"
+          delay: 5000
+          isBinary: false
+          dataType: "I32"
+          action: "read"
+
+    - operation:
+      name: faultReset
+      steps: []
+
+    - operation:
+      name: moveToPosition
+      steps:
+        - step:
+          name: "target position"
+          address: 0x607A
+          subindex: 0x00
+          value: "move_to_pos_val"
+          delay: 0
+          isBinary: false
+          dataType: "I32"
+          action: "write"
+
+    - operation:
+      name: setRPM
+      steps:
+        - step:
+          name: "profile velocity"
+          address: 0x6081
+          subindex: 0x00
+          value: "rpm_val"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+          action: "write"
+
+    - operation:
+      name: resetMultiTurn
+      steps:
+        - step:
+          name: "GUARD: verify candidate Pn07F mapping before reset"
+          address: 0x2000
+          subindex: 0x80
+          value: "0"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "read"
+        - step:
+          name: "Pn07F=1 absolute encoder multi-turn clear"
+          address: 0x2000
+          subindex: 0x80
+          value: "1"
+          delay: 300000
+          isBinary: false
+          dataType: "U16"
+          action: "write"
+        - step:
+          name: "Pn07F post-reset check"
+          address: 0x2000
+          subindex: 0x80
+          value: "0"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "read"
+
+    # Commissioning only; runtime SD710 driver does not call these.
+    - operation:
+      name: readXPortStatus
+      steps:
+        - step:
+          name: "Un100 X terminal status - commissioning only"
+          address: 0x2011
+          subindex: 0x01
+          value: "0"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "read"
+
+    - operation:
+      name: readYPortStatus
+      steps:
+        - step:
+          name: "Un101 Y terminal status - commissioning only"
+          address: 0x2011
+          subindex: 0x02
+          value: "0"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "read"
+
+    - operation:
+      name: readError
+      steps:
+        - step:
+          name: "error code"
+          address: 0x603F
+          subindex: 0x00
+          value: "0"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "read"
+
+    - operation:
+      name: readinputsignal
+      steps:
+        - step:
+          name: "digital input"
+          address: 0x60FD
+          subindex: 0x00
+          value: "0"
+          delay: 0
+          isBinary: false
+          dataType: "U32"
+          action: "read"
+
+    - operation:
+      name: readStatusword
+      steps:
+        - step:
+          name: "statusword"
+          address: 0x6041
+          subindex: 0x00
+          value: "0"
+          delay: 0
+          isBinary: false
+          dataType: "U16"
+          action: "read"
+
+    - operation:
+      name: readOpMode
+      steps:
+        - step:
+          name: "operation mode display"
+          address: 0x6061
+          subindex: 0x00
+          value: "0"
+          delay: 0
+          isBinary: false
+          dataType: "I8"
+          action: "read"
+
+    - operation:
+      name: reverse
+      steps: []
+
+    - operation:
+      name: nonreverse
+      steps: []
+
+    - operation:
+      name: ecs
+      steps: []
+
+    - operation:
+      name: hard_reset
+      steps: []
+
+    - operation:
+      name: finsignal
+      steps: []
+
+    - operation:
+      name: finsignalend
+      steps: []
+
+    - operation:
+      name: break_on
+      steps: []
+
+    - operation:
+      name: break_off
+      steps: []
+
+    - operation:
+      name: emergency
+      steps: []
+
+motion:
+  rpm_const: 218453
+  drive_x_ratio: 32768
+
+# Preserve the OP-proven 6 Rx / 8 Tx map exactly.
+# 0x60FE:01 remains padding only; application code does not use it for status/control.
+pdo:
+  dc_assign_activate: 0x0300
+
+  sync_managers:
+    - sm: 2
+      direction: output
+      watchdog: enable
+      pdo_index: 0x1600
+      entries:
+        - {index: 0x6040, subindex: 0x00, bits: 16, name: ctrl_word}
+        - {index: 0x607A, subindex: 0x00, bits: 32, name: target_pos}
+        - {index: 0x60FF, subindex: 0x00, bits: 32, name: target_vel}
+        - {index: 0x6071, subindex: 0x00, bits: 16, name: _pad_target_torque}
+        - {index: 0x6060, subindex: 0x00, bits: 8, name: op_mode}
+        - {index: 0x60FE, subindex: 0x01, bits: 32, name: _pad_digital_output}
+
+    - sm: 3
+      direction: input
+      watchdog: disable
+      pdo_index: 0x1A00
+      entries:
+        - {index: 0x6041, subindex: 0x00, bits: 16, name: status_word}
+        - {index: 0x6064, subindex: 0x00, bits: 32, name: actual_pos}
+        - {index: 0x606C, subindex: 0x00, bits: 32, name: _pad_actual_vel}
+        - {index: 0x6062, subindex: 0x00, bits: 32, name: _pad_pos_demand}
+        - {index: 0x6077, subindex: 0x00, bits: 16, name: _pad_torque_actual}
+        - {index: 0x6061, subindex: 0x00, bits: 8, name: op_mode_disp}
+        - {index: 0x60FD, subindex: 0x00, bits: 32, name: digital_in}
+        - {index: 0x603F, subindex: 0x00, bits: 16, name: error_code}
