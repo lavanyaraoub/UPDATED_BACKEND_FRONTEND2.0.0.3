@@ -9,8 +9,10 @@ package motordriver
 import "C"
 
 import (
+	"EtherCAT/channels"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,24 +24,34 @@ import (
 )
 
 type SD710 struct {
-	device          *MasterDevice
-	finPulse        atomic.Bool
-	safetyLatched   atomic.Bool
-	safetyResetSeen atomic.Bool
+	device   *MasterDevice
+	finPulse atomic.Bool
+	// 0 = available, 1 = latched, 3 = reset recovery (motion still blocked).
+	safetyState     atomic.Uint32
+	safetyNotify    atomic.Bool
+	resetArmed      atomic.Bool
+	ioStopMu        sync.Mutex
+	ioStops         []chan struct{}
+	ioWG            sync.WaitGroup
 	safetyTripCause atomic.Value // string
 }
 
 const (
+	// BENCH TEST ONLY: X2/X3 are internal VCSDSoft inputs. Reset may clear
+	// those software commands. Do not use this profile with a physical E-stop.
+	sd710VCSDSoftTestMode = true
+
 	sd710TargetReachedBit = uint16(1 << 10)
 	sd710SetPointAckBit   = uint16(1 << 12)
 
 	// LIVE-VERIFIED Rev21 0x60FD physical X-terminal bitmap.
-	// X1=ECS, X2=POT, X3=NOT, X4=CL, X5=DCL.
-	sd710X1ECS = uint32(1 << 0)
-	sd710X2POT = uint32(1 << 1)
-	sd710X3NOT = uint32(1 << 2)
-	sd710X4CL  = uint32(1 << 3)
-	sd710X5DCL = uint32(1 << 4)
+	// X1=ECS, X2=emergency, X3=reset, X4=CL, X5=DCL.
+	// VCSDSoft test profile: X2 ON means emergency active.
+	sd710X1ECS       = uint32(1 << 0)
+	sd710X2Emergency = uint32(1 << 1)
+	sd710X3Reset     = uint32(1 << 2)
+	sd710X4CL        = uint32(1 << 3)
+	sd710X5DCL       = uint32(1 << 4)
 
 	sd710PositionTolerance = int32(16)
 	sd710SolenoidY1Mask    = uint16(1 << 0)
@@ -84,11 +96,7 @@ func (d *SD710) potNotEnabled(masterDevice *MasterDevice) (bool, error) {
 	if masterDevice == nil {
 		return false, errors.New("SD710 potNotEnabled: nil device")
 	}
-	if !masterDevice.Device.StopWhenHWPOTNOT || !masterDevice.PdoDIReady {
-		return false, nil
-	}
-	di := uint32(masterDevice.PDODI.Load())
-	return di&(sd710X2POT|sd710X3NOT) != 0, nil
+	return false, nil // X2/X3 are not overtravel inputs on this machine.
 }
 
 // sd710SafetyTrip immediately removes every software motion request and latches
@@ -97,56 +105,158 @@ func (d *SD710) potNotEnabled(masterDevice *MasterDevice) (bool, error) {
 // IMPORTANT: this can stop the drive only while EtherCAT communication still
 // exists. If the Ethernet cable is physically removed, the drive-side SM2
 // watchdog must stop the servo because no new controlword can cross a broken link.
-func (d *SD710) sd710SafetyTrip(masterDevice *MasterDevice, cause string, alarmCode int) {
-	if masterDevice == nil {
+// Called by the PDO task too: no mailbox operations, logging or channel waits.
+func (d *SD710) sd710SafetyTrip(dev *MasterDevice, cause string, alarmCode int) {
+	if dev == nil {
 		return
 	}
-
-	firstTrip := d.safetyLatched.CompareAndSwap(false, true)
-	d.safetyTripCause.Store(cause)
-
-	// Remove every application motion source immediately.
-	masterDevice.desiredTargetVelocity.Store(0)
-	masterDevice.EnableJogPDO(false)
-	masterDevice.EnablePosPDO(false)
-	masterDevice.ppSetpointPending.Store(false)
-
-	// Freeze the dormant PP target at the last feedback position WITHOUT calling
-	// SetTargetPositionPDO(), because that helper intentionally re-arms bit4.
-	actual := masterDevice.PDOPos.Load()
-	masterDevice.desiredTargetPosition.Store(actual)
-
-	// CiA-402 Shutdown. The cyclic task transmits this on the next tick while
-	// communication is healthy. On a broken cable the drive-side watchdog is the
-	// only mechanism that can act physically at the drive.
-	masterDevice.desiredControlWord.Store(0x0006)
-
-	if alarmCode != 0 && firstTrip {
-		statusnotifier.DriverError(alarmCode)
-	}
-
-	if firstTrip {
-		logger.Error(fmt.Sprintf(
-			"[SD710-SAFETY] TRIPPED drive=%s cause=%s jog=%t posMode=%t cmdVel=%d sw=0x%04X err=0x%04X raw60FD=0x%08X pos=%d CW->0x0006",
-			masterDevice.Name,
-			cause,
-			masterDevice.IsJogEnabled(),
-			masterDevice.IsPosEnabled(),
-			masterDevice.desiredTargetVelocity.Load(),
-			uint16(masterDevice.PDOStatus.Load()&0xFFFF),
-			uint16(masterDevice.PDOErr.Load()&0xFFFF),
-			uint32(masterDevice.PDODI.Load()),
-			actual,
-		))
-		logger.Error(fmt.Sprintf(
-			"[SD710-SAFETY] MOTION INHIBITED drive=%s until RESET completes; stale jog/PP setpoints cleared",
-			masterDevice.Name,
-		))
+	prior := d.safetyState.Swap(1)
+	d.clearSD710Motion(dev)
+	dev.desiredControlWord.Store(0x0006)
+	if prior != 1 {
+		d.safetyTripCause.Store(cause)
+		d.safetyNotify.Store(true)
 	}
 }
 
+func (d *SD710) clearSD710Motion(dev *MasterDevice) {
+	dev.desiredTargetVelocity.Store(0)
+	dev.EnableJogPDO(false)
+	dev.EnablePosPDO(false)
+	dev.ppSetpointPending.Store(false)
+	dev.posMoveAborted.Store(true)
+	dev.desiredTargetPosition.Store(dev.PDOPos.Load())
+}
+
+func sd710EmergencyReleased(dev *MasterDevice) bool {
+	if dev == nil || !dev.PdoDIReady {
+		return false
+	}
+	active := uint32(dev.PDODI.Load())&sd710X2Emergency != 0
+	if sd710VCSDSoftTestMode {
+		return !active // VCSDSoft: ON = emergency, OFF = inactive.
+	}
+	return active // Original physical raw-input profile: OFF = pressed.
+}
+
+// Called only by the system-reset worker, never by the 1 ms PDO loop.
+// The software latch stays set while the native emergency input is cleared.
+func (d *SD710) sd710PrepareReset(dev *MasterDevice) error {
+	if dev == nil || !dev.PdoDIReady || !IsPDOActive() {
+		return errors.New("SD710 reset refused: live PDO input is unavailable")
+	}
+	if !sd710VCSDSoftTestMode {
+		if !sd710EmergencyReleased(dev) {
+			return errors.New("SD710 reset refused: release the physical emergency first")
+		}
+		return nil
+	}
+
+	d.sd710SafetyTrip(dev, "VCSDSoft test reset in progress", 0)
+	var before, after uint16
+	err := sd710WithSDOExclusive(dev, func() error {
+		read := func(subindex int, name string) (uint16, error) {
+			return sd710UploadU16WithRetry(dev, 0x2006, subindex, name)
+		}
+		// Refuse auto-clear if either terminal has been switched to hardware.
+		for _, input := range []struct {
+			subindex int
+			expected uint16
+			name     string
+		}{{0x03, 0x1019, "Pn602/X2"}, {0x04, 0x1004, "Pn603/X3"}} {
+			value, err := read(input.subindex, input.name)
+			if err != nil {
+				return fmt.Errorf("%s readback failed: %w", input.name, err)
+			}
+			if value != input.expected {
+				return fmt.Errorf("%s=0x%04X; test reset requires 0x%04X", input.name, value, input.expected)
+			}
+		}
+		var err error
+		before, err = read(0x31, "Pn630 software inputs before reset")
+		if err != nil {
+			return err
+		}
+		// Clear only X2 and X3; preserve ECS, CL, DCL and every other bit.
+		after = before &^ uint16(sd710X2Emergency|sd710X3Reset)
+		if after != before {
+			step := ethercatDevice.Step{Name: "Pn630 clear VCSDSoft X2/X3",
+				Address: 0x2006, SubIndex: 0x31, Value: fmt.Sprintf("%d", after),
+				DataType: "U16", Action: "write"}
+			if err := SDODownload(dev.Master, dev.Position, step); err != nil {
+				return err
+			}
+		}
+		value, err := read(0x31, "Pn630 software inputs after reset")
+		if err != nil {
+			return err
+		}
+		if value != after {
+			return fmt.Errorf("Pn630 verification failed: expected 0x%04X got 0x%04X", after, value)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("SD710 software test reset failed: %w", err)
+	}
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if !IsPDOActive() || !dev.PdoDIReady {
+			return errors.New("SD710 test reset lost PDO input")
+		}
+		if uint32(dev.PDODI.Load())&(sd710X2Emergency|sd710X3Reset) == 0 {
+			logger.Info(fmt.Sprintf("[SD710-TEST-RESET] drive=%s Pn630 0x%04X -> 0x%04X; X2/X3 OFF confirmed, motion remains latched until recovery completes", dev.Name, before, after))
+			return nil
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return errors.New("SD710 test reset failed: X2/X3 did not become OFF in PDO feedback")
+}
+
+// Invoked after every PDO input update. Inhibit has priority over all motion.
+func (d *SD710) sd710CyclicInhibit(dev *MasterDevice) bool {
+	if !sd710EmergencyReleased(dev) {
+		d.sd710SafetyTrip(dev, "X2 external emergency pressed or input unavailable", 0)
+	}
+	state := d.safetyState.Load()
+	if state != 0 {
+		d.clearSD710Motion(dev)
+	}
+	// Recovery permits only the common servo/fault-reset state machine.
+	// Jog/PP requests were cleared above, even during recovery.
+	return state == 1
+}
+
+// Require an observed release before accepting a reset press, including startup.
+func (d *SD710) sd710ResetEdge(di uint32) bool {
+	if di&sd710X3Reset == 0 {
+		d.resetArmed.Store(true)
+		return false
+	}
+	return d.resetArmed.Swap(false)
+}
+
+func (d *SD710) sd710BeginReset(dev *MasterDevice) bool {
+	if !sd710EmergencyReleased(dev) {
+		return false
+	}
+	d.safetyState.Store(3)
+	d.safetyNotify.Store(false)
+	d.clearSD710Motion(dev)
+	return true
+}
+
+func (d *SD710) sd710FinishReset(dev *MasterDevice, success bool) bool {
+	if success && sd710EmergencyReleased(dev) &&
+		d.safetyState.CompareAndSwap(3, 0) {
+		return true
+	}
+	d.sd710SafetyTrip(dev, "Reset failed or emergency changed during recovery", 0)
+	return false
+}
+
 func (d *SD710) sd710SafetyLatchedError() error {
-	if !d.safetyLatched.Load() {
+	if d.safetyState.Load() == 0 {
 		return nil
 	}
 	if v := d.safetyTripCause.Load(); v != nil {
@@ -203,28 +313,6 @@ func (d *SD710) sd710SafetyMonitor(masterDevice *MasterDevice, stop <-chan struc
 		masterDevice.Name, sd710SafetyPoll,
 	))
 
-	// RESET integration:
-	// The common Reset flow stops this monitor before resetting the drive and
-	// starts it again only after Reset() has completed.
-	if d.safetyLatched.Load() {
-		sw := uint16(masterDevice.PDOStatus.Load() & 0xFFFF)
-		motion := d.sd710MotionCommanded(masterDevice)
-		if sw&0x0008 == 0 && !motion {
-			d.safetyLatched.Store(false)
-			d.safetyResetSeen.Store(false)
-			d.safetyTripCause.Store("")
-			masterDevice.desiredTargetVelocity.Store(0)
-			masterDevice.EnableJogPDO(false)
-			masterDevice.EnablePosPDO(false)
-			masterDevice.ppSetpointPending.Store(false)
-			masterDevice.desiredControlWord.Store(0x000F)
-			logger.Info(fmt.Sprintf(
-				"[SD710-SAFETY] LATCH CLEARED drive=%s on post-RESET monitor restart sw=0x%04X",
-				masterDevice.Name, sw,
-			))
-		}
-	}
-
 	for {
 		select {
 		case <-stop:
@@ -233,16 +321,15 @@ func (d *SD710) sd710SafetyMonitor(masterDevice *MasterDevice, stop <-chan struc
 		case <-ticker.C:
 		}
 
-		resetActive := masterDevice.pdoFaultResetActive.Load() || masterDevice.pdoForcedServoCycleActive.Load()
-		if resetActive {
-			if !d.safetyResetSeen.Swap(true) {
-				logger.Info(fmt.Sprintf(
-					"[SD710-SAFETY] RESET observed drive=%s; waiting for reset cycle to complete",
-					masterDevice.Name,
-				))
-			}
+		if d.safetyNotify.Swap(false) {
+			logger.Error("[SD710-SAFETY] ", d.sd710SafetyLatchedError())
+			notifyDriverStatus("motor_running", "false", masterDevice)
+			statusnotifier.Alarm(fmt.Sprint(d.sd710SafetyLatchedError()))
+			go func() {
+				channels.WriteCommandExecInput("stop_prog_exec", "")
+				channels.WriteCommandExecInput("reset", "")
+			}()
 		}
-
 		sw := uint16(masterDevice.PDOStatus.Load() & 0xFFFF)
 		motion := d.sd710MotionCommanded(masterDevice)
 
@@ -263,7 +350,7 @@ func (d *SD710) sd710SafetyMonitor(masterDevice *MasterDevice, stop <-chan struc
 			continue
 		}
 
-		if clampMode != lastClampMode {
+		if d.safetyState.Load() == 0 && clampMode != lastClampMode {
 			logger.Info(fmt.Sprintf(
 				"[SD710-MODE] drive=%s runtime mode transition old=%d new=%d motion=%t CLDL_DELAY=%dms",
 				masterDevice.Name, lastClampMode, clampMode, motion, delayMs,
@@ -294,20 +381,6 @@ func (d *SD710) sd710SafetyMonitor(masterDevice *MasterDevice, stop <-chan struc
 			case2IdleBadSince = time.Time{}
 		}
 
-		if d.safetyLatched.Load() &&
-			d.safetyResetSeen.Load() &&
-			!resetActive &&
-			sw&0x0008 == 0 &&
-			!motion {
-			d.safetyLatched.Store(false)
-			d.safetyResetSeen.Store(false)
-			d.safetyTripCause.Store("")
-			logger.Info(fmt.Sprintf(
-				"[SD710-SAFETY] LATCH CLEARED drive=%s after RESET; motion may be requested again",
-				masterDevice.Name,
-			))
-		}
-
 		// Drive fault is NOT delayed by CL/DL timing.
 		if sw&0x0008 != 0 {
 			d.sd710SafetyTrip(masterDevice, fmt.Sprintf(
@@ -316,7 +389,7 @@ func (d *SD710) sd710SafetyMonitor(masterDevice *MasterDevice, stop <-chan struc
 			continue
 		}
 
-		if d.safetyLatched.Load() {
+		if d.safetyState.Load() != 0 {
 			masterDevice.desiredTargetVelocity.Store(0)
 			masterDevice.EnableJogPDO(false)
 			masterDevice.EnablePosPDO(false)
@@ -334,8 +407,8 @@ func (d *SD710) sd710SafetyMonitor(masterDevice *MasterDevice, stop <-chan struc
 
 		di := uint32(masterDevice.PDODI.Load())
 		ecs := di&sd710X1ECS != 0
-		pot := di&sd710X2POT != 0
-		notActive := di&sd710X3NOT != 0
+		pot := false       // X2 is external emergency, not POT.
+		notActive := false // X3 is reset, not NOT.
 		cl := di&sd710X4CL != 0
 		dcl := di&sd710X5DCL != 0
 		solOn := sd710SolenoidCommanded(masterDevice.Name)
@@ -360,17 +433,6 @@ func (d *SD710) sd710SafetyMonitor(masterDevice *MasterDevice, stop <-chan struc
 				"[SD710-SAFETY-IO] drive=%s raw60FD=0x%08X ECS=%t POT=%t NOT=%t CL=%t DCL=%t SOL=%t motion=%t",
 				masterDevice.Name, di, ecs, pot, notActive, cl, dcl, solOn, motion))
 			lastLoggedDI = di
-		}
-
-		// POT/NOT remain immediate safety stops.
-		if motion && masterDevice.Device.StopWhenHWPOTNOT && (pot || notActive) {
-			which := "POT"
-			if notActive {
-				which = "NOT"
-			}
-			d.sd710SafetyTrip(masterDevice, fmt.Sprintf(
-				"hardware %s active during motion raw60FD=0x%08X", which, di), 0)
-			continue
 		}
 
 		if motion {
@@ -425,7 +487,7 @@ func (d *SD710) sd710SafetyMonitor(masterDevice *MasterDevice, stop <-chan struc
 					"[SD710-CLDL-DELAY] drive=%s waiting after motion stop elapsed=%dms remaining=%dms expected SOL=1 CL=0 DCL=1 got SOL=%t CL=%t DCL=%t",
 					masterDevice.Name,
 					elapsed.Milliseconds(),
-					(delay-elapsed).Milliseconds(),
+					(delay - elapsed).Milliseconds(),
 					solOn, cl, dcl,
 				))
 				lastModeFeedbackLog = time.Now()
@@ -476,7 +538,7 @@ func (d *SD710) sd710SafetyMonitor(masterDevice *MasterDevice, stop <-chan struc
 					"[SD710-CLDL-DELAY] drive=%s CASE1 WAIT elapsed=%dms remaining=%dms expected SOL=1 CL=0 DCL=1 got SOL=%t CL=%t DCL=%t",
 					masterDevice.Name,
 					elapsed.Milliseconds(),
-					(delay-elapsed).Milliseconds(),
+					(delay - elapsed).Milliseconds(),
 					solOn, cl, dcl,
 				))
 				lastModeFeedbackLog = time.Now()
@@ -524,7 +586,7 @@ func (d *SD710) sd710SafetyMonitor(masterDevice *MasterDevice, stop <-chan struc
 				"[SD710-CLDL-DELAY] drive=%s CASE2 WAIT elapsed=%dms remaining=%dms expected SOL=0 CL=1 DCL=0 got SOL=%t CL=%t DCL=%t",
 				masterDevice.Name,
 				elapsed.Milliseconds(),
-				(delay-elapsed).Milliseconds(),
+				(delay - elapsed).Milliseconds(),
 				solOn, cl, dcl,
 			))
 			lastModeFeedbackLog = time.Now()
@@ -786,17 +848,37 @@ func sd710WithSDOExclusive(device *MasterDevice, fn func() error) error {
 }
 
 func sd710ReadU16(device *MasterDevice, address, subindex int, name string) (uint16, error) {
-	var value int
+	var value uint16
 	err := sd710WithSDOExclusive(device, func() error {
-		step := ethercatDevice.Step{Name: name, Address: address, SubIndex: subindex, Value: "0", DataType: "U16", Action: "read"}
-		v, err := SDOUpload2(device.Master, device.Position, step)
-		if err != nil {
-			return err
-		}
-		value = v
-		return nil
+		var err error
+		value, err = sd710UploadU16WithRetry(device, address, subindex, name)
+		return err
 	})
-	return uint16(value), err
+	return value, err
+}
+
+// Caller holds sd710MailboxMu through sd710WithSDOExclusive.
+// The shared SDOUpload wrapper formats errno as text, so EINTR must be
+// recognized from that existing error message. Never retry EIO or an SDO abort.
+func sd710UploadU16WithRetry(device *MasterDevice, address, subindex int, name string) (uint16, error) {
+	if device == nil {
+		return 0, errors.New("SD710 read: nil device")
+	}
+	step := ethercatDevice.Step{Name: name, Address: address, SubIndex: subindex,
+		Value: "0", DataType: "U16", Action: "read"}
+	const maxAttempts = 5
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		value, err := SDOUpload2(device.Master, device.Position, step)
+		if err == nil {
+			return uint16(value), nil
+		}
+		if !strings.Contains(err.Error(), "Interrupted system call") || attempt == maxAttempts {
+			return 0, fmt.Errorf("SD710 read %s (0x%04X:%02X), attempt %d: %w", name, address, subindex, attempt, err)
+		}
+		logger.Warn(fmt.Sprintf("[SD710-SDO-RETRY] %s interrupted; retry %d/%d", name, attempt+1, maxAttempts))
+		time.Sleep(10 * time.Millisecond)
+	}
+	return 0, errors.New("SD710 read retry exhausted")
 }
 
 func sd710WriteU16(device *MasterDevice, address, subindex int, value uint16, name string) error {
@@ -968,6 +1050,9 @@ func (d *SD710) sendFinishSignal(masterDevice *MasterDevice, operation ethercatD
 		return errors.New("SD710 sendFinishSignal: nil device")
 	}
 
+	if err := d.sd710SafetyLatchedError(); err != nil {
+		return err
+	}
 	// Preserve Y1 SOL state while pulsing Y2 FIN.
 	d.finPulse.Store(true)
 	onValue, err := sd710UpdatePn631Bits(masterDevice, sd710FinishY2Mask, 0, "Pn631 Y2 FIN ON")
@@ -984,7 +1069,10 @@ func (d *SD710) sendFinishSignal(masterDevice *MasterDevice, operation ethercatD
 	if delayMs <= 0 {
 		delayMs = 500
 	}
-	time.Sleep(time.Duration(delayMs) * time.Millisecond)
+	deadline := time.Now().Add(time.Duration(delayMs) * time.Millisecond)
+	for time.Now().Before(deadline) && d.safetyState.Load() == 0 {
+		time.Sleep(5 * time.Millisecond)
+	}
 
 	offValue, err := sd710UpdatePn631Bits(masterDevice, 0, sd710FinishY2Mask, "Pn631 Y2 FIN OFF")
 	if err != nil {
@@ -997,6 +1085,9 @@ func (d *SD710) sendFinishSignal(masterDevice *MasterDevice, operation ethercatD
 		"[SD710-FIN] UI OFF + Y2 OFF drive=%s Pn631=0x%04X SOL_preserved=%t",
 		masterDevice.Name, offValue, offValue&sd710SolenoidY1Mask != 0,
 	))
+	if err := d.sd710SafetyLatchedError(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1004,49 +1095,51 @@ var (
 	sd710MailboxMu   sync.Mutex
 	sd710OutputMu    sync.Mutex
 	sd710Pn631Shadow sync.Map // map[string]*atomic.Uint32
-	sd710IOStopMu    sync.Mutex
-	sd710IOStops     []chan struct{}
 )
 
 func (d *SD710) pollIOStat(availableDevices []*MasterDevice) {
-	sd710IOStopMu.Lock()
-	sd710IOStops = make([]chan struct{}, 0, len(availableDevices))
-	sd710IOStopMu.Unlock()
+	d.ioStopMu.Lock()
+	if len(d.ioStops) != 0 {
+		d.ioStopMu.Unlock()
+		return
+	}
+	d.ioStops = make([]chan struct{}, 0, len(availableDevices))
+	d.ioStopMu.Unlock()
 
 	for _, dev := range availableDevices {
 		if dev == nil {
 			continue
 		}
 		stop := make(chan struct{})
-		sd710IOStopMu.Lock()
-		sd710IOStops = append(sd710IOStops, stop)
-		sd710IOStopMu.Unlock()
+		d.ioStopMu.Lock()
+		d.ioStops = append(d.ioStops, stop)
+		d.ioStopMu.Unlock()
 
-		ioPollingWG.Add(3)
+		d.ioWG.Add(3)
 		go d.ioStatusListener(dev, stop)
 		go func(md *MasterDevice, ch <-chan struct{}) {
-			defer ioPollingWG.Done()
+			defer d.ioWG.Done()
 			d.sd710SafetyMonitor(md, ch)
 		}(dev, stop)
 		go func(md *MasterDevice, ch <-chan struct{}) {
-			defer ioPollingWG.Done()
+			defer d.ioWG.Done()
 			d.sd710LinkMonitor(md, ch)
 		}(dev, stop)
 	}
 }
 
 func (d *SD710) stopPollIOStat() {
-	sd710IOStopMu.Lock()
-	for _, stop := range sd710IOStops {
+	d.ioStopMu.Lock()
+	for _, stop := range d.ioStops {
 		close(stop)
 	}
-	sd710IOStops = nil
-	sd710IOStopMu.Unlock()
-	waitWithTimeout(&ioPollingWG, 2*time.Second, "SD710 ioStatusListener")
+	d.ioStops = nil
+	d.ioStopMu.Unlock()
+	waitWithTimeout(&d.ioWG, 2*time.Second, "SD710 ioStatusListener")
 }
 
 func (d *SD710) ioStatusListener(masterDev *MasterDevice, stop <-chan struct{}) {
-	defer ioPollingWG.Done()
+	defer d.ioWG.Done()
 
 	logger.Info(fmt.Sprintf("[SD710-PDO-IO] drive=%s 100%% mailbox-free I/O: X1..X5 from 0x60FD PDO; UI outputs from logical/native states; no Un100/Un101/0x60FE runtime monitoring", masterDev.Name))
 
@@ -1070,11 +1163,20 @@ func (d *SD710) ioStatusListener(masterDev *MasterDevice, stop <-chan struct{}) 
 		}
 
 		di := uint32(masterDev.PDODI.Load())
+		if masterDev.PdoDIReady {
+			if d.sd710ResetEdge(di) {
+				if (sd710VCSDSoftTestMode || sd710EmergencyReleased(masterDev)) && !systemResetInProgress.Load() {
+					go performSysReset(true)
+				} else {
+					logger.Warn("[SD710-RESET] ignored: emergency active or reset already running")
+				}
+			}
+		}
 		sw := uint16(masterDev.PDOStatus.Load() & 0xFFFF)
 
 		ecs := masterDev.PdoDIReady && di&sd710X1ECS != 0
-		pot := masterDev.PdoDIReady && di&sd710X2POT != 0
-		notActive := masterDev.PdoDIReady && di&sd710X3NOT != 0
+		pot := false
+		notActive := false
 		cl := masterDev.PdoDIReady && di&sd710X4CL != 0
 		dcl := masterDev.PdoDIReady && di&sd710X5DCL != 0
 		fin := d.finPulse.Load()
@@ -1082,7 +1184,7 @@ func (d *SD710) ioStatusListener(masterDev *MasterDevice, stop <-chan struct{}) 
 		solOp := sd710SolenoidCommanded(masterDev.Name)
 
 		if di != lastDI {
-			logger.Info(fmt.Sprintf("[SD710-PDO-IN] drive=%s raw60FD=0x%08X X1/ECS=%t X2/POT=%t X3/NOT=%t X4/CL=%t X5/DCL=%t", masterDev.Name, di, ecs, pot, notActive, cl, dcl))
+			logger.Info(fmt.Sprintf("[SD710-PDO-IN] drive=%s raw60FD=0x%08X X1/ECS=%t X2/emergencyReleased=%t X3/reset=%t X4/CL=%t X5/DCL=%t testMode=%t", masterDev.Name, di, ecs, sd710EmergencyReleased(masterDev), di&sd710X3Reset != 0, cl, dcl, sd710VCSDSoftTestMode))
 			lastDI = di
 		}
 
@@ -1129,6 +1231,32 @@ func (d *SD710) SetupPDO(dev *MasterDevice) error {
 	}
 
 	d.device = dev
+
+	// Verify the selected input profile before PDO activation.
+	for _, input := range []struct {
+		subindex  int
+		name      string
+		testValue uint16
+	}{
+		{0x02, "Pn601/X1", 0x0000},
+		{0x03, "Pn602/X2", 0x1019},
+		{0x04, "Pn603/X3", 0x1004},
+		{0x05, "Pn604/X4", 0x0000},
+		{0x06, "Pn605/X5", 0x1000},
+	} {
+		expected := uint16(0)
+		if sd710VCSDSoftTestMode {
+			expected = input.testValue
+		}
+		value, err := sd710ReadU16(dev, 0x2006, input.subindex, input.name)
+		if err != nil {
+			return fmt.Errorf("SD710 input configuration readback failed for %s: %w", input.name, err)
+		}
+		if value != expected {
+			return fmt.Errorf("SD710 input configuration mismatch: %s=0x%04X; expected 0x%04X (VCSDSoftTestMode=%t)", input.name, value, expected, sd710VCSDSoftTestMode)
+		}
+	}
+	logger.Warn(fmt.Sprintf("[SD710-INPUT-PROFILE] drive=%s VCSDSoftTestMode=%t; test profile permits software X2/X3 clear ONLY on explicit reset", dev.Name, sd710VCSDSoftTestMode))
 	cfg := settings.GetDriverSettings(dev.Name)
 	logger.Info(fmt.Sprintf(
 		"[SD710-SETTINGS-CHECK] drive=%s cl_dl=%d cldl_timing=%d jog_feed=%d",
@@ -1157,7 +1285,7 @@ func (d *SD710) SetupPDO(dev *MasterDevice) error {
 	}
 	logger.Info("[SD710-SETUP] BEGIN generic YAML-driven PDO setup")
 	logger.Info("[SD710-STARTUP] SDO-safe profile active: retained motion parameters are not rewritten at every boot; YAML faultReset is intentionally empty")
-	logger.Info("[SD710-REV] HOME removed; X1=ECS X2=POT X3=NOT X4=CL X5=DCL from live-verified 0x60FD bits0..4")
+	logger.Info("[SD710-REV] HOME removed; X1=ECS X2=emergency X3=reset(rising-edge) X4=CL X5=DCL from 0x60FD bits0..4; VCSDSoft test uses X2 ON=pressed")
 	logger.Info("[SD710-REV] clamp truth table enforced: SOL=0 -> CL=1,DCL=0; SOL=1 -> CL=0,DCL=1; CL=DCL=1 is invalid")
 	logger.Info("[SD710-REV] Y1=software SOL O/P via Pn611=0x1007/Pn631.bit0; Y2=FIN via Pn612=0x1002/Pn631.bit1; Y3=native Servo Ready")
 	logger.Info("[SD710-REV] runtime input feedback is mailbox-free from 0x60FD; 0x60FE is not used for SD710 SOL/FIN logic")
@@ -1202,49 +1330,46 @@ func (d *SD710) SetupPDO(dev *MasterDevice) error {
 // SD710 application tolerance: 0.0005 degrees.
 // Matches the calculation in your working EtherCATFRD build.
 func sd710TargetPositionTolerance(device *MasterDevice) int32 {
-    if device == nil || device.Device.DriveXRatio <= 0 {
-        return 10
-    }
+	if device == nil || device.Device.DriveXRatio <= 0 {
+		return 10
+	}
 
-    tolerance := int32(
-        float64(device.Device.DriveXRatio)*0.0005 + 0.5,
-    )
-    if tolerance < 1 {
-        return 1
-    }
-    return tolerance
+	tolerance := int32(
+		float64(device.Device.DriveXRatio)*0.0005 + 0.5,
+	)
+	if tolerance < 1 {
+		return 1
+	}
+	return tolerance
 }
 
 func (d *SD710) IsTargetReached(sw uint16) bool {
+	if d.device == nil || d.safetyState.Load() != 0 {
+		return false
+	}
+	if !IsPDOActive() || d.device.posMoveAborted.Load() {
+		return false
+	}
 	if sw&0x0008 != 0 {
 		return false
 	}
 	if sw&sd710TargetReachedBit == 0 || sw&sd710SetPointAckBit != 0 {
 		return false
 	}
-	if d.device == nil {
-		return true
-	}
-	if d.device.PdoOpModeDisplayReady && int8(d.device.PDOOpModeDisplay.Load()) != 1 {
+	if !d.device.PdoOpModeDisplayReady || int8(d.device.PDOOpModeDisplay.Load()) != 1 {
 		return false
 	}
-
-	goal := d.device.desiredTargetPosition.Load()
-	actual := d.device.PDOPos.Load()
+	goal := int64(d.device.desiredTargetPosition.Load())
+	actual := int64(d.device.PDOPos.Load())
 	diff := goal - actual
 	if diff < 0 {
 		diff = -diff
 	}
-	tol := sd710TargetPositionTolerance(d.device)
-	if diff > tol {
-		logger.Warn(fmt.Sprintf("[SD710-TRUST-DRIVE] Target Reached accepted from drive: sw=0x%04X goal=%d actual=%d residual=%d; normalizing internal goal to actual for frozen common %d-count gate", sw, goal, actual, diff, tol))
-		d.device.desiredTargetPosition.Store(actual)
-	}
-	return true
+	return diff <= int64(sd710TargetPositionTolerance(d.device))
 }
 
 func (d *SD710) JogControlword(cwBase uint16) uint16 {
-	if d.safetyLatched.Load() {
+	if d.safetyState.Load() != 0 {
 		return 0x0006
 	}
 

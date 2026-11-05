@@ -250,6 +250,13 @@ func hasTargetReached(masterDevice *MasterDevice) error {
 				bit10Cleared = true
 				break
 			}
+			// SD710 may finish a short move before bit10 LOW is observed.
+			// Phase 2 still requires stable completion within position tolerance.
+			if sd, ok := masterDevice.Driver.(*SD710); ok && sd.IsTargetReached(sw) {
+				logger.Debug("[PDO-PP] SD710 within tolerance; continuing to stable completion check")
+				bit10Cleared = true
+				break
+			}
 			time.Sleep(1 * time.Millisecond)
 		}
 
@@ -367,6 +374,37 @@ func doRotateToAbsoluteGoal(masterDevice *MasterDevice, goal int32) error {
 	return runPositionGoal(masterDevice, goal, "ABS")
 }
 
+// An SD710 recovery intentionally marks the cancelled move as aborted on each
+// inhibited PDO cycle. Consume that OLD abort only for a fresh, permitted
+// position command. Never clear it from the completion-wait loop.
+func prepareSD710PositionCommand(dev *MasterDevice) error {
+	sd, ok := dev.Driver.(*SD710)
+	if !ok {
+		return nil
+	}
+	ready := func() bool {
+		return IsPDOActive() && dev.PdoPosReady && dev.PdoDIReady &&
+			!systemResetInProgress.Load() && sd.safetyState.Load() == 0 &&
+			sd710EmergencyReleased(dev) &&
+			!dev.pdoShutdownActive.Load() && !dev.pdoFaultResetActive.Load() &&
+			!dev.pdoForcedServoCycleActive.Load() && !dev.pdoMTResetActive.Load() &&
+			uint16(dev.PDOStatus.Load()&0xFFFF)&0x0008 == 0
+	}
+	if !ready() {
+		return fmt.Errorf("SD710 position command refused: emergency, reset, drive fault or PDO input not ready")
+	}
+	if dev.IsJogEnabled() || dev.IsPosEnabled() {
+		return fmt.Errorf("SD710 position command refused: another motion command is active")
+	}
+	dev.posMoveAborted.Store(false)
+	// Recheck after clearing in case the safety monitor tripped concurrently.
+	if !ready() {
+		dev.posMoveAborted.Store(true)
+		return fmt.Errorf("SD710 position command refused: safety state changed while preparing move")
+	}
+	return nil
+}
+
 // runPositionGoal contains the common PDO motion, settle and clamp sequence.
 // Both relative auxiliary moves and fixed absolute indexing targets use the
 // same drive handshake and safety behavior.
@@ -374,6 +412,9 @@ func runPositionGoal(masterDevice *MasterDevice, goal int32, targetKind string) 
 
 	if !(IsPDOActive() && masterDevice.PdoPosReady) {
 		return fmt.Errorf("PDO position mode not ready — SDO fallback removed")
+	}
+	if err := prepareSD710PositionCommand(masterDevice); err != nil {
+		return err
 	}
 
 	logger.Info("[PDO] Starting rotation in PP mode targetKind=", targetKind,

@@ -1,11 +1,11 @@
 ---
 # VEICHI SD710 EtherCAT(CoE) Servo Drive Rev21
-# Final one-terminal / one-function I/O revision.
+# VCSDSoft BENCH TEST profile. Not for a connected physical emergency button.
 #
 # LIVE-VERIFIED X INPUT PDO MAP (VCSDSoft Un443 / 0x60FD):
 #   X1 = 0x00000001 -> ECS
-#   X2 = 0x00000002 -> POT
-#   X3 = 0x00000004 -> NOT
+#   X2 = 0x00000002 -> VCSDSoft emergency (ON = pressed)
+#   X3 = 0x00000004 -> RESET
 #   X4 = 0x00000008 -> CL
 #   X5 = 0x00000010 -> DCL
 #
@@ -14,6 +14,8 @@
 #   Y2 = Finish output (Pn612=0x1002 -> Pn631.bit1) -> UI FIN pulse
 #   Y3 = Servo Ready (Pn613=0x0001) -> UI ALM-OUT indicator
 #
+# Pn630 (0x2006:31) is preserved at startup; emergency is not auto-cleared.
+# Explicit reset clears only software X2/X3; X5 is simulated, not physical proof.
 # Runtime X monitoring uses 0x60FD PDO only. No Un100 SDO polling.
 # Clamp truth table: SOL=0 -> CL=1,DCL=0; SOL=1 -> CL=0,DCL=1.
 # CL=1,DCL=1 is invalid; CL=0,DCL=0 is transition/unknown.
@@ -37,20 +39,20 @@ ethercat:
           action: "write"
 
         - step:
-          name: "Pn602 X2 positive overtravel"
+          name: "Pn602 X2 VCSDSoft emergency ON=pressed"
           address: 0x2006
           subindex: 0x03
-          value: "0x0002"
+          value: "0x1019"
           delay: 50000
           isBinary: false
           dataType: "U16"
           action: "write"
 
         - step:
-          name: "Pn603 X3 negative overtravel"
+          name: "Pn603 X3 VCSDSoft reset"
           address: 0x2006
           subindex: 0x04
-          value: "0x0003"
+          value: "0x1004"
           delay: 50000
           isBinary: false
           dataType: "U16"
@@ -67,10 +69,10 @@ ethercat:
           action: "write"
 
         - step:
-          name: "Pn605 X5 raw DCL feedback"
+          name: "Pn605 X5 VCSDSoft simulated DCL feedback"
           address: 0x2006
           subindex: 0x06
-          value: "0x0000"
+          value: "0x1000"
           delay: 50000
           isBinary: false
           dataType: "U16"

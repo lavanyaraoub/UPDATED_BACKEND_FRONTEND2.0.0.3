@@ -59,6 +59,17 @@ func listenSystemReset() {
 }
 
 func performSysReset(checkMotorRunning bool) {
+	for _, dev := range masterDevices {
+		if dev == nil {
+			continue
+		}
+		if sd, ok := dev.Driver.(*SD710); ok && !sd710VCSDSoftTestMode && !sd710EmergencyReleased(dev) {
+			sd.sd710SafetyTrip(dev, "Reset refused: X2 external emergency active", 0)
+			statusnotifier.Alarm("Reset refused: release SD710 external emergency first")
+			return
+		}
+	}
+
 	if checkMotorRunning {
 		for _, dev := range masterDevices {
 			stat := getCurrentDriverStatus(dev.Name)
@@ -109,6 +120,21 @@ func resetSystemWorker() {
 func runSystemReset() (stopRequested bool) {
 	logger.Info("resetting driver system....")
 
+	for _, dev := range masterDevices {
+		if dev == nil {
+			continue
+		}
+		if sd, ok := dev.Driver.(*SD710); ok {
+			if err := sd.sd710PrepareReset(dev); err != nil {
+				sd.sd710SafetyTrip(dev, err.Error(), 0)
+				logger.Error(err.Error())
+				statusnotifier.Alarm(err.Error())
+				statusnotifier.SocketMessage("reset_done", "reset failed")
+				return false
+			}
+		}
+	}
+
 	// Capture hardware limits before stopping listeners or cycling the servo.
 	// The A6 input word can briefly look inactive during CiA-402 recovery even
 	// while the physical NOT/POT switch remains held.
@@ -146,6 +172,29 @@ func runSystemReset() (stopRequested bool) {
 		statusnotifier.SocketMessage("reset_done", "reset failed")
 		restartResetListeners()
 		return false
+	}
+
+	resetSD710 := make(map[*MasterDevice]*SD710)
+	sd710ResetCommitted := false
+	defer func() {
+		if !sd710ResetCommitted {
+			for dev, sd := range resetSD710 {
+				sd.sd710FinishReset(dev, false)
+			}
+		}
+	}()
+	for _, dev := range masterDevices {
+		if dev == nil {
+			continue
+		}
+		if sd, ok := dev.Driver.(*SD710); ok {
+			resetSD710[dev] = sd
+			if !sd.sd710BeginReset(dev) {
+				statusnotifier.Alarm("Reset refused: SD710 emergency active")
+				restartResetListeners()
+				return false
+			}
+		}
 	}
 
 	// Clear state left behind by emergency/quick-stop before recovering the
@@ -240,6 +289,15 @@ drained:
 		}
 	}
 
+	sd710ResetOK := resetOK && allOperational
+	for dev, sd := range resetSD710 {
+		if !sd.sd710FinishReset(dev, sd710ResetOK) {
+			allOperational = false
+			postResetAlarm = "SD710 reset failed or external emergency changed during reset"
+		}
+	}
+	sd710ResetCommitted = resetOK && allOperational
+
 	logger.Info("resetting driver completed....")
 	if !resetOK || !allOperational {
 		if allOperational {
@@ -264,6 +322,8 @@ func readHardwareLimitState(device *MasterDevice) (pot, not, available bool) {
 	}
 	di := uint32(device.PDODI.Load())
 	switch device.Driver.(type) {
+	case *SD710:
+		return false, false, false // X2/X3 are emergency/reset, not limits.
 	case A6Minas, *A6Minas:
 		return (di & (1 << 1)) == 0, (di & (1 << 2)) == 0, true
 	default:

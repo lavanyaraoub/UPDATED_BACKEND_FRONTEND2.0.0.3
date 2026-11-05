@@ -583,6 +583,28 @@ func StartPDOCyclic(devices []*MasterDevice) error {
 						d.PDOOpModeDisplay.Store(int32(omd))
 					}
 
+					// SD710 only: stop/recovery bypass all motion branches.
+					if sd, ok := d.Driver.(*SD710); ok {
+						inhibited := sd.sd710CyclicInhibit(d)
+						state := sd.safetyState.Load()
+						if inhibited || state != 0 {
+							stopCW := uint16(0x0006)
+							if state == 3 {
+								enabled := false
+								stopCW = cia402NextControlword(status, &enabled, d.pdoFaultResetActive.Load(), d.Driver)
+								if d.pdoShutdownActive.Load() || d.pdoMTResetActive.Load() || d.pdoForcedServoCycleActive.Load() {
+									stopCW = 0x0006
+								}
+							}
+							C.write_u16(d.DomainPD, d.OffControlWord, C.uint16_t(stopCW))
+							C.write_s8(d.DomainPD, d.OffOpMode, C.int8_t(1))
+							C.write_s32(d.DomainPD, d.OffTargetVel, C.int32_t(0))
+							C.write_s32(d.DomainPD, d.OffTargetPos, C.int32_t(d.PDOPos.Load()))
+							C.ecrt_domain_queue(d.Domain)
+							continue
+						}
+					}
+
 					// ── CiA-402 state machine ─────────────────────────────
 					// d.Driver is the per-device IMotorDriver instance set by
 					// InitMaster(). FaultResetControlword() is drive-specific:
