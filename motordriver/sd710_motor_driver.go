@@ -34,6 +34,7 @@ type SD710 struct {
 	ioStops         []chan struct{}
 	ioWG            sync.WaitGroup
 	safetyTripCause atomic.Value // string
+	ppCompletionLastLog atomic.Int64
 }
 
 const (
@@ -1344,28 +1345,64 @@ func sd710TargetPositionTolerance(device *MasterDevice) int32 {
 }
 
 func (d *SD710) IsTargetReached(sw uint16) bool {
-	if d.device == nil || d.safetyState.Load() != 0 {
-		return false
-	}
-	if !IsPDOActive() || d.device.posMoveAborted.Load() {
-		return false
-	}
-	if sw&0x0008 != 0 {
-		return false
-	}
-	if sw&sd710TargetReachedBit == 0 || sw&sd710SetPointAckBit != 0 {
-		return false
-	}
-	if !d.device.PdoOpModeDisplayReady || int8(d.device.PDOOpModeDisplay.Load()) != 1 {
-		return false
-	}
-	goal := int64(d.device.desiredTargetPosition.Load())
-	actual := int64(d.device.PDOPos.Load())
-	diff := goal - actual
-	if diff < 0 {
-		diff = -diff
-	}
-	return diff <= int64(sd710TargetPositionTolerance(d.device))
+    if d.device == nil || d.safetyState.Load() != 0 {
+        return false
+    }
+
+    if !IsPDOActive() || d.device.posMoveAborted.Load() {
+        return false
+    }
+
+    if sw&0x0008 != 0 {
+        return false
+    }
+
+    if sw&sd710TargetReachedBit == 0 ||
+        sw&sd710SetPointAckBit != 0 {
+        return false
+    }
+
+    if !d.device.PdoOpModeDisplayReady ||
+        int8(d.device.PDOOpModeDisplay.Load()) != 1 {
+        return false
+    }
+
+    goal := int64(d.device.desiredTargetPosition.Load())
+    actual := int64(d.device.PDOPos.Load())
+
+    diff := goal - actual
+    if diff < 0 {
+        diff = -diff
+    }
+
+    tolerance := int64(sd710TargetPositionTolerance(d.device))
+
+    if diff > tolerance {
+        now := time.Now().UnixNano()
+        last := d.ppCompletionLastLog.Load()
+
+        if now-last >= int64(500*time.Millisecond) &&
+            d.ppCompletionLastLog.CompareAndSwap(last, now) {
+
+            logger.Info(fmt.Sprintf(
+                "[SD710-PP-CHECK] drive=%s sw=0x%04X "+
+                    "mode=%d goal=%d pdoTarget=%d actual=%d "+
+                    "error=%d tolerance=%d completion=BLOCKED",
+                d.device.Name,
+                sw,
+                d.device.PDOOpModeDisplay.Load(),
+                goal,
+                d.device.currentTargetPosition.Load(),
+                actual,
+                diff,
+                tolerance,
+            ))
+        }
+
+        return false
+    }
+
+    return true
 }
 
 func (d *SD710) JogControlword(cwBase uint16) uint16 {
