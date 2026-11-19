@@ -6,7 +6,7 @@ import (
 	"EtherCAT/logger"
 	"EtherCAT/settings"
 	"context"
-	"encoding/binary"
+	"io"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -39,7 +39,7 @@ const (
 	bpfServerIP     = "192.168.1.10" // ILC 131 ETH static IP
 	bpfServerPort   = 502            // Modbus/TCP standard port
 	bpfRegisterAddr = 2              // udtMODBUS_Server_Data[2] — 0-indexed
-	bpfPollMs       = 50             // poll interval milliseconds
+	bpfPollMs       = 10             // poll interval milliseconds
 	bpfGMFileName   = "bpf_program"  // GM code file owned by BPF poller
 	bpfDriveName    = "A"            // drive axis to move
 )
@@ -98,7 +98,7 @@ func runBPFPoller(ctx context.Context) {
 	logger.Info("[BPF] Modbus poller starting — server:", bpfServerIP)
 	logger.Info("[BPF] Wiring: 1.1=X0(ignored) 2.1=X1(LSB) 1.4=X2 2.4=X3 3.1=X4(MSB)")
 
-	prevSignal := "0000"
+	filter := bpfSignalFilter{}
 
 	for {
 		if !waitForBPFPoll(ctx, bpfPollMs*time.Millisecond) {
@@ -111,6 +111,9 @@ func runBPFPoller(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
+		
+			filter.reset()
+		
 			logger.Warn("[BPF] Modbus read error:", err, "— retrying in 5s")
 			if !waitForBPFPoll(ctx, 5*time.Second) {
 				return
@@ -131,19 +134,21 @@ func runBPFPoller(ctx context.Context) {
 		//
 		// e.g. only 2.4 plugged: rawVal=9(01001) → (9>>1)&0xF=4 → "0100" ✓
 		// e.g. nothing plugged:  rawVal=1(00001) → (1>>1)&0xF=0 → "0000" → ignored ✓
+		drvSettings := settings.GetDriverSettings(bpfDriveName)
 		signal := fmt.Sprintf("%04b", (rawVal>>1)&0x000F)
 
-		// ── Rising edge — only act on change, ignore idle "0000" ──────────
-		if signal == prevSignal || signal == "0000" {
-			prevSignal = signal
+		if !filter.accept(signal, time.Now()) {
 			continue
 		}
-
-		logger.Info("[BPF] Rising edge:", prevSignal, "→", signal)
-		prevSignal = signal
+		
+		logger.Info(
+			"[BPF] ACCEPT stable code:",
+			signal,
+			" (100ms stable; idle rearm required)",
+		)
 
 		// ── Match signal against BinaryPosFeeds from settings.json ────────
-		drvSettings := settings.GetDriverSettings(bpfDriveName)
+		//drvSettings := settings.GetDriverSettings(bpfDriveName)
 		matched := false
 
 		for _, entry := range drvSettings.BinaryPosFeeds {
@@ -246,40 +251,41 @@ func readModbusRegister(ip string, port int, registerAddr uint16) (uint16, error
 	return readModbusRegisterContext(context.Background(), ip, port, registerAddr)
 }
 
-func readModbusRegisterContext(ctx context.Context, ip string, port int, registerAddr uint16) (uint16, error) {
-	addr := fmt.Sprintf("%s:%d", ip, port)
+func readModbusRegisterContext(
+    ctx context.Context,
+    ip string,
+    port int,
+    registerAddr uint16,
+) (uint16, error) {
+    addr := fmt.Sprintf("%s:%d", ip, port)
 
-	dialer := net.Dialer{Timeout: 3 * time.Second}
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
-	if err != nil {
-		return 0, fmt.Errorf("dial %s: %w", addr, err)
-	}
-	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(3 * time.Second))
+    dialer := net.Dialer{Timeout: 3 * time.Second}
+    conn, err := dialer.DialContext(ctx, "tcp", addr)
+    if err != nil {
+        return 0, fmt.Errorf("dial %s: %w", addr, err)
+    }
+    defer conn.Close()
 
-	request := []byte{
-		0x00, 0x01,
-		0x00, 0x00,
-		0x00, 0x06,
-		0x01,
-		0x03,
-		byte(registerAddr >> 8), byte(registerAddr & 0xFF),
-		0x00, 0x01,
-	}
+    if err := conn.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+        return 0, fmt.Errorf("set deadline: %w", err)
+    }
 
-	if _, err := conn.Write(request); err != nil {
-		return 0, fmt.Errorf("write request: %w", err)
-	}
+    request := []byte{
+        0x00, 0x01,
+        0x00, 0x00,
+        0x00, 0x06,
+        0x01,
+        0x03,
+        byte(registerAddr >> 8),
+        byte(registerAddr & 0xFF),
+        0x00, 0x01,
+    }
 
-	response := make([]byte, 11)
-	if _, err := conn.Read(response); err != nil {
-		return 0, fmt.Errorf("read response: %w", err)
-	}
+    if n, err := conn.Write(request); err != nil {
+        return 0, fmt.Errorf("write request: %w", err)
+    } else if n != len(request) {
+        return 0, io.ErrShortWrite
+    }
 
-	if response[7] == 0x83 {
-		return 0, fmt.Errorf("modbus exception code: %d", response[8])
-	}
-
-	value := binary.BigEndian.Uint16(response[9:11])
-	return value, nil
+    return readBPFModbusResponse(conn)
 }
